@@ -602,8 +602,8 @@ impl Channel for MatrixChannel {
 
     async fn send(&self, message: &SendMessage) -> anyhow::Result<()> {
         let client = self.matrix_client().await?;
-        let target_room_id = if message.recipient.contains("||") {
-            message.recipient.split_once("||").unwrap().1.to_string()
+        let target_room_id = if let Some((_, room_id)) = message.recipient.split_once("||") {
+            room_id.to_string()
         } else {
             self.target_room_id().await?
         };
