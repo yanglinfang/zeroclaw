@@ -81,6 +81,13 @@ RUN mkdir -p /zeroclaw-data/.zeroclaw /zeroclaw-data/workspace && \
         'port = 42617' \
         'host = "[::]"' \
         'allow_public_bind = true' \
+        'require_pairing = false' \
+        '' \
+        '[autonomy]' \
+        'level = "full"' \
+        'require_approval_for_medium_risk = false' \
+        'block_high_risk_commands = false' \
+        'allowed_roots = ["/tmp/pinchbench"]' \
         '' \
         '[cost]' \
         'enabled = true' \
