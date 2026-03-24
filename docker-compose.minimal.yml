@@ -22,10 +22,12 @@ services:
 
     environment:
       - ZEROCLAW_ALLOW_PUBLIC_BIND=true
+      - ZEROCLAW_GATEWAY_HOST=[::]
       - ZEROCLAW_GATEWAY_PORT=42617
 
     volumes:
       - zeroclaw-data:/zeroclaw-data
+      - /tmp/pinchbench:/tmp/pinchbench
 
     ports:
       - "${HOST_PORT:-42617}:42617"
