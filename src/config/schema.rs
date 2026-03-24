@@ -1753,6 +1753,29 @@ fn get_default_pricing() -> std::collections::HashMap<String, ModelPricing> {
         },
     );
 
+    // DeepSeek models (OpenRouter pricing)
+    prices.insert(
+        "deepseek/deepseek-v3.2".into(),
+        ModelPricing {
+            input: 0.14,
+            output: 0.56,
+        },
+    );
+    prices.insert(
+        "deepseek/deepseek-chat".into(),
+        ModelPricing {
+            input: 0.14,
+            output: 0.56,
+        },
+    );
+    prices.insert(
+        "deepseek/deepseek-r1".into(),
+        ModelPricing {
+            input: 0.55,
+            output: 2.19,
+        },
+    );
+
     prices
 }
 
@@ -9209,6 +9232,15 @@ impl Config {
         if let Ok(model) = std::env::var("ZEROCLAW_MODEL").or_else(|_| std::env::var("MODEL")) {
             if !model.is_empty() {
                 self.default_model = Some(model);
+            }
+        }
+
+        // Max tool iterations: ZEROCLAW_MAX_TOOL_ITERATIONS
+        if let Ok(val) = std::env::var("ZEROCLAW_MAX_TOOL_ITERATIONS") {
+            if let Ok(n) = val.parse::<usize>() {
+                if n > 0 {
+                    self.agent.max_tool_iterations = n;
+                }
             }
         }
 

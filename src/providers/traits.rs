@@ -128,6 +128,8 @@ pub struct StreamChunk {
     pub is_final: bool,
     /// Approximate token count for this chunk (estimated).
     pub token_count: usize,
+    /// API-reported token usage (typically present only on the final chunk).
+    pub usage: Option<TokenUsage>,
 }
 
 impl StreamChunk {
@@ -137,6 +139,7 @@ impl StreamChunk {
             delta: text.into(),
             is_final: false,
             token_count: 0,
+            usage: None,
         }
     }
 
@@ -146,6 +149,17 @@ impl StreamChunk {
             delta: String::new(),
             is_final: true,
             token_count: 0,
+            usage: None,
+        }
+    }
+
+    /// Create a final chunk with usage data.
+    pub fn final_with_usage(usage: TokenUsage) -> Self {
+        Self {
+            delta: String::new(),
+            is_final: true,
+            token_count: 0,
+            usage: Some(usage),
         }
     }
 
@@ -155,6 +169,7 @@ impl StreamChunk {
             delta: message.into(),
             is_final: true,
             token_count: 0,
+            usage: None,
         }
     }
 
@@ -441,21 +456,41 @@ pub trait Provider: Send + Sync {
     }
 
     /// Streaming chat with history.
-    /// Default implementation falls back to stream_chat_with_system with last user message.
+    /// Default implementation falls back to stream_chat_with_system by extracting
+    /// the system prompt (first system message) and last user message from history.
     fn stream_chat_with_history(
         &self,
-        _messages: &[ChatMessage],
-        _model: &str,
-        _temperature: f64,
-        _options: StreamOptions,
+        messages: &[ChatMessage],
+        model: &str,
+        temperature: f64,
+        options: StreamOptions,
     ) -> stream::BoxStream<'static, StreamResult<StreamChunk>> {
-        // For default implementation, we need to convert to owned strings
-        // This is a limitation of the default implementation
-        let provider_name = "unknown".to_string();
+        // Extract system prompt from the first system message, if any
+        let system_prompt = messages
+            .iter()
+            .find(|m| m.role == "system")
+            .map(|m| m.content.clone());
 
-        // Create a single empty chunk to indicate not supported
-        let chunk = StreamChunk::error(format!("{} does not support streaming", provider_name));
-        stream::once(async move { Ok(chunk) }).boxed()
+        // Extract the last user message
+        let last_user = messages
+            .iter()
+            .rev()
+            .find(|m| m.role == "user")
+            .map(|m| m.content.clone());
+
+        match last_user {
+            Some(message) => self.stream_chat_with_system(
+                system_prompt.as_deref(),
+                &message,
+                model,
+                temperature,
+                options,
+            ),
+            None => {
+                let chunk = StreamChunk::error("No user message found in history".to_string());
+                stream::once(async move { Ok(chunk) }).boxed()
+            }
+        }
     }
 }
 

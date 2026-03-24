@@ -938,6 +938,7 @@ impl Agent {
 
             let mut streamed_text = String::new();
             let mut got_stream = false;
+            let mut stream_usage: Option<crate::providers::traits::TokenUsage> = None;
 
             while let Some(item) = stream.next().await {
                 match item {
@@ -946,6 +947,9 @@ impl Agent {
                             got_stream = true;
                             streamed_text.push_str(&chunk.delta);
                             let _ = event_tx.send(TurnEvent::Chunk { delta: chunk.delta }).await;
+                        }
+                        if chunk.usage.is_some() {
+                            stream_usage = chunk.usage;
                         }
                     }
                     Err(_) => break,
@@ -961,7 +965,7 @@ impl Agent {
                 crate::providers::ChatResponse {
                     text: Some(streamed_text),
                     tool_calls: Vec::new(),
-                    usage: None,
+                    usage: stream_usage,
                     reasoning_content: None,
                 }
             } else {
@@ -986,6 +990,15 @@ impl Agent {
                     Err(err) => return Err(err),
                 }
             };
+
+            // Record cost via global tracker (if enabled)
+            if let Some(ref usage) = response.usage {
+                crate::agent::loop_::record_cost_for_streaming(
+                    &self.model_name,
+                    &effective_model,
+                    usage,
+                );
+            }
 
             let (text, calls) = self.tool_dispatcher.parse_response(&response);
             if calls.is_empty() {

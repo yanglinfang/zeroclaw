@@ -1,0 +1,120 @@
+# syntax=docker/dockerfile:1.7
+#
+# Dockerfile.scratch — Smallest possible ZeroClaw container
+#
+# Produces a fully static MUSL binary in a FROM scratch image.
+# Final image = binary + CA certs + config. Nothing else. No shell, no libc, no OS.
+#
+# Build:  docker build -f Dockerfile.scratch -t zeroclaw:scratch .
+# Run:    docker run -d --name zeroclaw -p 42617:42617 -e API_KEY=sk-... zeroclaw:scratch
+#
+# Typical image size: ~30-50 MB (binary only, depends on features).
+
+# ── Stage 0: Frontend build ─────────────────────────────────────
+FROM node:22-alpine AS web-builder
+WORKDIR /web
+COPY web/package.json web/package-lock.json* ./
+RUN npm ci --ignore-scripts 2>/dev/null || npm install --ignore-scripts
+COPY web/ .
+RUN npm run build
+
+# ── Stage 1: Static MUSL build ──────────────────────────────────
+FROM rust:1.94-alpine AS builder
+
+RUN apk add --no-cache musl-dev pkgconf perl make file tzdata
+
+WORKDIR /app
+
+# 1. Cache dependency build
+COPY Cargo.toml Cargo.lock ./
+COPY crates/robot-kit/ crates/robot-kit/
+COPY crates/aardvark-sys/ crates/aardvark-sys/
+RUN mkdir -p src benches \
+    && echo "fn main() {}" > src/main.rs \
+    && echo "" > src/lib.rs \
+    && echo "fn main() {}" > benches/agent_benchmarks.rs
+
+# Build with NO optional features for smallest binary.
+# Only default features minus the heavy ones.
+RUN --mount=type=cache,id=zc-musl-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=zc-musl-git,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,id=zc-musl-target,target=/app/target,sharing=locked \
+    cargo build --release --locked --no-default-features
+RUN rm -rf src benches
+
+# 2. Real build
+COPY src/ src/
+COPY benches/ benches/
+COPY --from=web-builder /web/dist web/dist
+COPY *.rs .
+RUN touch src/main.rs
+RUN --mount=type=cache,id=zc-musl-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=zc-musl-git,target=/usr/local/cargo/git,sharing=locked \
+    --mount=type=cache,id=zc-musl-target,target=/app/target,sharing=locked \
+    rm -rf target/release/.fingerprint/zeroclawlabs-* \
+           target/release/deps/zeroclawlabs-* \
+           target/release/incremental/zeroclawlabs-* && \
+    cargo build --release --locked --no-default-features && \
+    cp target/release/zeroclaw /app/zeroclaw && \
+    strip /app/zeroclaw
+
+# Sanity check: binary must be > 1 MB
+RUN size=$(stat -c%s /app/zeroclaw 2>/dev/null || stat -f%z /app/zeroclaw) && \
+    if [ "$size" -lt 1000000 ]; then echo "ERROR: binary too small (${size} B)" && exit 1; fi
+
+# Verify it's statically linked
+RUN file /app/zeroclaw | grep -q "statically linked" || \
+    (echo "WARNING: binary may not be fully static" && file /app/zeroclaw)
+
+# Prepare runtime data directory
+RUN mkdir -p /zeroclaw-data/.zeroclaw /zeroclaw-data/workspace && \
+    chown -R 65534:65534 /zeroclaw-data && \
+    printf '%s\n' \
+        'workspace_dir = "/zeroclaw-data/workspace"' \
+        'config_path = "/zeroclaw-data/.zeroclaw/config.toml"' \
+        'api_key = ""' \
+        'default_provider = "openrouter"' \
+        'default_model = "anthropic/claude-sonnet-4-20250514"' \
+        'default_temperature = 0.7' \
+        '' \
+        '[gateway]' \
+        'port = 42617' \
+        'host = "[::]"' \
+        'allow_public_bind = true' \
+        '' \
+        '[cost]' \
+        'enabled = true' \
+        'daily_limit_usd = 10.0' \
+        'monthly_limit_usd = 100.0' \
+        'warn_at_percent = 80' \
+        'allow_override = false' \
+        > /zeroclaw-data/.zeroclaw/config.toml
+
+# ── Stage 2: Scratch runtime (absolute minimum) ─────────────────
+FROM scratch
+
+# CA certificates for HTTPS (extracted from Alpine)
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+
+# Timezone data (minimal, UTC only)
+COPY --from=builder /usr/share/zoneinfo/UTC /usr/share/zoneinfo/UTC
+
+# Binary + runtime data
+COPY --from=builder /app/zeroclaw /usr/local/bin/zeroclaw
+COPY --from=builder /zeroclaw-data /zeroclaw-data
+
+ENV LANG=C.UTF-8
+ENV ZEROCLAW_WORKSPACE=/zeroclaw-data/workspace
+ENV HOME=/zeroclaw-data
+ENV ZEROCLAW_GATEWAY_PORT=42617
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+
+WORKDIR /zeroclaw-data
+# USER 65534:65534  # Disabled: named volume mounts as root in scratch
+EXPOSE 42617
+
+HEALTHCHECK --interval=60s --timeout=10s --retries=3 --start-period=10s \
+    CMD ["/usr/local/bin/zeroclaw", "status", "--format=exit-code"]
+
+ENTRYPOINT ["/usr/local/bin/zeroclaw"]
+CMD ["daemon"]

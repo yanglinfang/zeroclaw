@@ -202,6 +202,12 @@ impl CostTracker {
             })
             .clone()
     }
+
+    /// Return the already-initialized global tracker, if any.
+    /// Returns `None` if not yet initialized or cost tracking is disabled.
+    pub fn get_global() -> Option<Arc<Self>> {
+        GLOBAL_COST_TRACKER.get().and_then(|opt| opt.clone())
+    }
 }
 
 fn resolve_storage_path(workspace_dir: &Path) -> Result<PathBuf> {

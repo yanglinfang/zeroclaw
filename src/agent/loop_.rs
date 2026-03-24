@@ -114,6 +114,37 @@ fn record_tool_loop_cost_usage(
     Some((cost_usage.total_tokens, cost_usage.cost_usd))
 }
 
+/// Record token usage via the global cost tracker (for streaming paths
+/// like `Agent::turn_streamed` that bypass the task-local scoping).
+pub(crate) fn record_cost_for_streaming(
+    provider_name: &str,
+    model: &str,
+    usage: &crate::providers::traits::TokenUsage,
+) {
+    let input_tokens = usage.input_tokens.unwrap_or(0);
+    let output_tokens = usage.output_tokens.unwrap_or(0);
+    let total_tokens = input_tokens.saturating_add(output_tokens);
+    if total_tokens == 0 {
+        return;
+    }
+
+    // Use the global singleton tracker directly
+    let tracker = match CostTracker::get_global() {
+        Some(t) => t,
+        None => return,
+    };
+
+    let cost_usage = CostTokenUsage::new(model, input_tokens, output_tokens, 0.0, 0.0);
+
+    if let Err(error) = tracker.record_usage(cost_usage) {
+        tracing::warn!(
+            provider = provider_name,
+            model,
+            "Failed to record streaming cost usage: {error}"
+        );
+    }
+}
+
 /// Check budget before an LLM call. Returns `None` when no cost tracking
 /// context is scoped (tests, delegate, CLI without cost config).
 pub(crate) fn check_tool_loop_budget() -> Option<BudgetCheck> {

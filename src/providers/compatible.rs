@@ -719,6 +719,20 @@ struct ResponsesContent {
 #[derive(Debug, Deserialize)]
 struct StreamChunkResponse {
     choices: Vec<StreamChoice>,
+    /// Token usage reported by the API (typically on the final chunk).
+    #[serde(default)]
+    usage: Option<SseUsage>,
+}
+
+/// Usage data from an OpenAI-compatible streaming response.
+#[derive(Debug, Deserialize)]
+struct SseUsage {
+    #[serde(default)]
+    prompt_tokens: Option<u64>,
+    #[serde(default)]
+    completion_tokens: Option<u64>,
+    #[serde(default)]
+    cached_tokens: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -736,14 +750,42 @@ struct StreamDelta {
     reasoning_content: Option<String>,
 }
 
+/// Parsed result from an SSE line.
+enum SseParsed {
+    /// No actionable content (empty line, comment, [DONE]).
+    None,
+    /// Text content delta.
+    Content(String),
+    /// Token usage from the final chunk (may accompany empty content).
+    Usage(TokenUsage),
+    /// Both content and usage in the same chunk.
+    ContentAndUsage(String, TokenUsage),
+}
+
+fn sse_usage_to_token_usage(usage: &SseUsage) -> TokenUsage {
+    TokenUsage {
+        input_tokens: usage.prompt_tokens,
+        output_tokens: usage.completion_tokens,
+        cached_input_tokens: usage.cached_tokens,
+    }
+}
+
 /// Parse SSE (Server-Sent Events) stream from OpenAI-compatible providers.
 /// Handles the `data: {...}` format and `[DONE]` sentinel.
 fn parse_sse_line(line: &str) -> StreamResult<Option<String>> {
+    match parse_sse_line_full(line)? {
+        SseParsed::Content(s) | SseParsed::ContentAndUsage(s, _) => Ok(Some(s)),
+        _ => Ok(None),
+    }
+}
+
+/// Full SSE parser that also captures usage data.
+fn parse_sse_line_full(line: &str) -> StreamResult<SseParsed> {
     let line = line.trim();
 
     // Skip empty lines and comments
     if line.is_empty() || line.starts_with(':') {
-        return Ok(None);
+        return Ok(SseParsed::None);
     }
 
     // SSE format: "data: {...}"
@@ -752,27 +794,35 @@ fn parse_sse_line(line: &str) -> StreamResult<Option<String>> {
 
         // Check for [DONE] sentinel
         if data == "[DONE]" {
-            return Ok(None);
+            return Ok(SseParsed::None);
         }
 
         // Parse JSON delta
         let chunk: StreamChunkResponse = serde_json::from_str(data).map_err(StreamError::Json)?;
 
+        // Extract usage if present
+        let usage = chunk.usage.as_ref().map(sse_usage_to_token_usage);
+
         // Extract content from delta
-        if let Some(choice) = chunk.choices.first() {
+        let content = chunk.choices.first().and_then(|choice| {
             if let Some(content) = &choice.delta.content {
                 if !content.is_empty() {
-                    return Ok(Some(content.clone()));
+                    return Some(content.clone());
                 }
             }
             // Fallback to reasoning_content for thinking models
-            if let Some(reasoning) = &choice.delta.reasoning_content {
-                return Ok(Some(reasoning.clone()));
-            }
-        }
+            choice.delta.reasoning_content.clone()
+        });
+
+        return match (content, usage) {
+            (Some(c), Some(u)) => Ok(SseParsed::ContentAndUsage(c, u)),
+            (Some(c), None) => Ok(SseParsed::Content(c)),
+            (None, Some(u)) => Ok(SseParsed::Usage(u)),
+            (None, None) => Ok(SseParsed::None),
+        };
     }
 
-    Ok(None)
+    Ok(SseParsed::None)
 }
 
 /// Convert SSE byte stream to text chunks.
@@ -818,12 +868,13 @@ fn sse_bytes_to_chunks(
                     buffer.push_str(&text);
 
                     // Process complete lines
+                    let mut last_usage: Option<TokenUsage> = None;
                     while let Some(pos) = buffer.find('\n') {
                         let line = buffer.drain(..=pos).collect::<String>();
                         buffer = buffer[pos + 1..].to_string();
 
-                        match parse_sse_line(&line) {
-                            Ok(Some(content)) => {
+                        match parse_sse_line_full(&line) {
+                            Ok(SseParsed::Content(content)) => {
                                 let mut chunk = StreamChunk::delta(content);
                                 if count_tokens {
                                     chunk = chunk.with_token_estimate();
@@ -832,12 +883,29 @@ fn sse_bytes_to_chunks(
                                     return; // Receiver dropped
                                 }
                             }
-                            Ok(None) => {}
+                            Ok(SseParsed::ContentAndUsage(content, usage)) => {
+                                let mut chunk = StreamChunk::delta(content);
+                                if count_tokens {
+                                    chunk = chunk.with_token_estimate();
+                                }
+                                if tx.send(Ok(chunk)).await.is_err() {
+                                    return;
+                                }
+                                last_usage = Some(usage);
+                            }
+                            Ok(SseParsed::Usage(usage)) => {
+                                last_usage = Some(usage);
+                            }
+                            Ok(SseParsed::None) => {}
                             Err(e) => {
                                 let _ = tx.send(Err(e)).await;
                                 return;
                             }
                         }
+                    }
+                    // If we got usage in this batch, send it as a final chunk
+                    if let Some(usage) = last_usage {
+                        let _ = tx.send(Ok(StreamChunk::final_with_usage(usage))).await;
                     }
                 }
                 Err(e) => {
@@ -847,7 +915,7 @@ fn sse_bytes_to_chunks(
             }
         }
 
-        // Send final chunk
+        // Send final chunk (without usage — usage was already sent if available)
         let _ = tx.send(Ok(StreamChunk::final_chunk())).await;
     });
 
