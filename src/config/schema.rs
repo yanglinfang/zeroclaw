@@ -3280,7 +3280,7 @@ pub struct ImageGenConfig {
 }
 
 fn default_image_gen_model() -> String {
-    "google/gemini-2.5-flash-image".into()
+    "google/gemini-3.1-flash-image-preview".into()
 }
 
 fn default_image_gen_api_key_env() -> String {

@@ -49,3 +49,6 @@ lcov.info
 
 # Wrangler cache
 .wrangler/
+
+# Eval artifacts (benchmark logs, results, images)
+eval/
