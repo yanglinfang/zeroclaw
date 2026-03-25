@@ -129,22 +129,39 @@ impl ImageGenTool {
             self.generate_via_fal(&client, &api_key, model, &prompt, size).await?
         };
 
-        // ── Download image ─────────────────────────────────────────
-        let img_resp = client
-            .get(&image_url)
-            .send()
-            .await
-            .context("Failed to download generated image")?;
+        // ── Get image bytes (download URL or decode base64 data URI) ──
+        let bytes = if image_url.starts_with("data:image") {
+            // Base64 data URI: "data:image/png;base64,iVBOR..."
+            let b64_data = image_url
+                .split_once(",")
+                .map(|(_, data)| data)
+                .unwrap_or(&image_url);
+            use base64::Engine;
+            base64::engine::general_purpose::STANDARD
+                .decode(b64_data)
+                .context("Failed to decode base64 image data")?
+        } else {
+            // HTTP URL: download the image
+            let img_resp = client
+                .get(&image_url)
+                .send()
+                .await
+                .context("Failed to download generated image")?;
 
-        if !img_resp.status().is_success() {
-            return Ok(ToolResult {
-                success: false,
-                output: String::new(),
-                error: Some(format!("Failed to download image from {image_url} ({})", img_resp.status())),
-            });
-        }
+            if !img_resp.status().is_success() {
+                return Ok(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some(format!(
+                        "Failed to download image from {} ({})",
+                        &image_url[..image_url.len().min(100)],
+                        img_resp.status()
+                    )),
+                });
+            }
 
-        let bytes = img_resp.bytes().await.context("Failed to read image bytes")?;
+            img_resp.bytes().await.context("Failed to read image bytes")?.to_vec()
+        };
 
         // ── Save to disk ───────────────────────────────────────────
         let images_dir = self.workspace_dir.join("images");
@@ -198,9 +215,9 @@ impl ImageGenTool {
             .ok_or_else(|| anyhow::anyhow!("No image URL in fal.ai response"))
     }
 
-    /// Generate via OpenRouter chat completions with `modalities: ["image"]`.
-    /// Works with models like `bytedance/seedream-4.5` or any OpenRouter
-    /// image-capable model.
+    /// Generate via OpenRouter chat completions.
+    /// Image-capable models (e.g. `google/gemini-2.5-flash-image`) return
+    /// images in `choices[0].message.images[0].image_url.url` as base64 data URIs.
     async fn generate_via_openrouter(
         &self,
         client: &reqwest::Client,
@@ -211,9 +228,10 @@ impl ImageGenTool {
         let url = "https://openrouter.ai/api/v1/chat/completions";
         let body = json!({
             "model": model,
-            "messages": [{ "role": "user", "content": prompt }],
-            "modalities": ["image"],
-            "response_format": { "type": "url" }
+            "messages": [{
+                "role": "user",
+                "content": format!("Generate an image: {prompt}. Only output the image, no text.")
+            }]
         });
 
         let resp = client
@@ -234,25 +252,34 @@ impl ImageGenTool {
 
         let resp_json: serde_json::Value = resp.json().await.context("Failed to parse OpenRouter response")?;
 
-        // OpenRouter returns image URL in choices[0].message.content[0].image_url.url
-        // or as a data URI in choices[0].message.content
-        if let Some(url) = resp_json.pointer("/choices/0/message/content/0/image_url/url").and_then(|v| v.as_str()) {
+        // Format 1: images array (Gemini image models)
+        // choices[0].message.images[0].image_url.url = "data:image/png;base64,..."
+        if let Some(url) = resp_json
+            .pointer("/choices/0/message/images/0/image_url/url")
+            .and_then(|v| v.as_str())
+        {
             return Ok(url.to_string());
         }
 
-        // Fallback: check for direct URL string in content
-        if let Some(content) = resp_json.pointer("/choices/0/message/content").and_then(|v| v.as_str()) {
-            if content.starts_with("http") {
+        // Format 2: content array with image_url objects
+        if let Some(url) = resp_json
+            .pointer("/choices/0/message/content/0/image_url/url")
+            .and_then(|v| v.as_str())
+        {
+            return Ok(url.to_string());
+        }
+
+        // Format 3: direct URL string in content
+        if let Some(content) = resp_json
+            .pointer("/choices/0/message/content")
+            .and_then(|v| v.as_str())
+        {
+            if content.starts_with("http") || content.starts_with("data:image") {
                 return Ok(content.to_string());
             }
         }
 
-        // Fallback: look for any URL in the response
-        if let Some(url) = resp_json.pointer("/data/0/url").and_then(|v| v.as_str()) {
-            return Ok(url.to_string());
-        }
-
-        anyhow::bail!("No image URL found in OpenRouter response: {resp_json}")
+        anyhow::bail!("No image found in OpenRouter response. Check model supports image output.")
     }
 }
 

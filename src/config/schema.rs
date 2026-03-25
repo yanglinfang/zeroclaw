@@ -3280,7 +3280,7 @@ pub struct ImageGenConfig {
 }
 
 fn default_image_gen_model() -> String {
-    "bytedance/seedream-4.5".into()
+    "google/gemini-2.5-flash-image".into()
 }
 
 fn default_image_gen_api_key_env() -> String {
