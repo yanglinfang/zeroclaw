@@ -51,7 +51,13 @@ impl ImageGenTool {
             .ok_or_else(|| format!("Missing API key: set the {env_var} environment variable"))
     }
 
-    /// Core generation logic: call fal.ai, download image, save to disk.
+    /// Check if a model identifier targets OpenRouter (provider/model format)
+    /// rather than fal.ai (fal-ai/model/variant format).
+    fn is_openrouter_model(model: &str) -> bool {
+        !model.starts_with("fal-ai/")
+    }
+
+    /// Core generation logic: routes to fal.ai or OpenRouter based on model.
     async fn generate(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
         // ── Parse parameters ───────────────────────────────────────
         let prompt = match args.get("prompt").and_then(|v| v.as_str()) {
@@ -77,52 +83,18 @@ impl ImageGenTool {
             |n| n.to_string_lossy().to_string(),
         );
 
-        let size = args
-            .get("size")
-            .and_then(|v| v.as_str())
-            .unwrap_or("square_hd");
-
-        // Validate size enum.
-        const VALID_SIZES: &[&str] = &[
-            "square_hd",
-            "landscape_4_3",
-            "portrait_4_3",
-            "landscape_16_9",
-            "portrait_16_9",
-        ];
-        if !VALID_SIZES.contains(&size) {
-            return Ok(ToolResult {
-                success: false,
-                output: String::new(),
-                error: Some(format!(
-                    "Invalid size '{size}'. Valid values: {}",
-                    VALID_SIZES.join(", ")
-                )),
-            });
-        }
-
         let model = args
             .get("model")
             .and_then(|v| v.as_str())
             .filter(|s| !s.trim().is_empty())
             .unwrap_or(&self.default_model);
 
-        // Validate model identifier: must look like a fal.ai model path
-        // (e.g. "fal-ai/flux/schnell"). Reject values with "..", query
-        // strings, or fragments that could redirect the HTTP request.
-        if model.contains("..")
-            || model.contains('?')
-            || model.contains('#')
-            || model.contains('\\')
-            || model.starts_with('/')
-        {
+        // Validate model identifier: reject path traversal.
+        if model.contains("..") || model.contains('?') || model.contains('#') || model.contains('\\') {
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
-                error: Some(format!(
-                    "Invalid model identifier '{model}'. \
-                     Must be a fal.ai model path (e.g. 'fal-ai/flux/schnell')."
-                )),
+                error: Some(format!("Invalid model identifier '{model}'.")),
             });
         }
 
@@ -138,48 +110,28 @@ impl ImageGenTool {
             }
         };
 
-        // ── Call fal.ai ────────────────────────────────────────────
+        // ── Route to backend ───────────────────────────────────────
         let client = Self::http_client();
-        let url = format!("https://fal.run/{model}");
-
-        let body = json!({
-            "prompt": prompt,
-            "image_size": size,
-            "num_images": 1
-        });
-
-        let resp = client
-            .post(&url)
-            .header("Authorization", format!("Key {api_key}"))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .context("fal.ai request failed")?;
-
-        let status = resp.status();
-        if !status.is_success() {
-            let body_text = resp.text().await.unwrap_or_default();
-            return Ok(ToolResult {
-                success: false,
-                output: String::new(),
-                error: Some(format!("fal.ai API error ({status}): {body_text}")),
-            });
-        }
-
-        let resp_json: serde_json::Value = resp
-            .json()
-            .await
-            .context("Failed to parse fal.ai response as JSON")?;
-
-        let image_url = resp_json
-            .pointer("/images/0/url")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("No image URL in fal.ai response"))?;
+        let image_url = if Self::is_openrouter_model(model) {
+            self.generate_via_openrouter(&client, &api_key, model, &prompt).await?
+        } else {
+            let size = args.get("size").and_then(|v| v.as_str()).unwrap_or("square_hd");
+            const VALID_SIZES: &[&str] = &[
+                "square_hd", "landscape_4_3", "portrait_4_3", "landscape_16_9", "portrait_16_9",
+            ];
+            if !VALID_SIZES.contains(&size) {
+                return Ok(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some(format!("Invalid size '{size}'. Valid: {}", VALID_SIZES.join(", "))),
+                });
+            }
+            self.generate_via_fal(&client, &api_key, model, &prompt, size).await?
+        };
 
         // ── Download image ─────────────────────────────────────────
         let img_resp = client
-            .get(image_url)
+            .get(&image_url)
             .send()
             .await
             .context("Failed to download generated image")?;
@@ -188,46 +140,119 @@ impl ImageGenTool {
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
-                error: Some(format!(
-                    "Failed to download image from {image_url} ({})",
-                    img_resp.status()
-                )),
+                error: Some(format!("Failed to download image from {image_url} ({})", img_resp.status())),
             });
         }
 
-        let bytes = img_resp
-            .bytes()
-            .await
-            .context("Failed to read image bytes")?;
+        let bytes = img_resp.bytes().await.context("Failed to read image bytes")?;
 
         // ── Save to disk ───────────────────────────────────────────
         let images_dir = self.workspace_dir.join("images");
-        tokio::fs::create_dir_all(&images_dir)
-            .await
-            .context("Failed to create images directory")?;
+        tokio::fs::create_dir_all(&images_dir).await.context("Failed to create images directory")?;
 
         let output_path = images_dir.join(format!("{safe_name}.png"));
-        tokio::fs::write(&output_path, &bytes)
-            .await
-            .context("Failed to write image file")?;
+        tokio::fs::write(&output_path, &bytes).await.context("Failed to write image file")?;
 
         let size_kb = bytes.len() / 1024;
-
         Ok(ToolResult {
             success: true,
             output: format!(
-                "Image generated successfully.\n\
-                 File: {}\n\
-                 Size: {} KB\n\
-                 Model: {}\n\
-                 Prompt: {}",
-                output_path.display(),
-                size_kb,
-                model,
-                prompt,
+                "Image generated successfully.\nFile: {}\nSize: {} KB\nModel: {}\nPrompt: {}",
+                output_path.display(), size_kb, model, prompt,
             ),
             error: None,
         })
+    }
+
+    /// Generate via fal.ai synchronous endpoint.
+    async fn generate_via_fal(
+        &self,
+        client: &reqwest::Client,
+        api_key: &str,
+        model: &str,
+        prompt: &str,
+        size: &str,
+    ) -> anyhow::Result<String> {
+        let url = format!("https://fal.run/{model}");
+        let body = json!({ "prompt": prompt, "image_size": size, "num_images": 1 });
+
+        let resp = client
+            .post(&url)
+            .header("Authorization", format!("Key {api_key}"))
+            .json(&body)
+            .send()
+            .await
+            .context("fal.ai request failed")?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body_text = resp.text().await.unwrap_or_default();
+            anyhow::bail!("fal.ai API error ({status}): {body_text}");
+        }
+
+        let resp_json: serde_json::Value = resp.json().await.context("Failed to parse fal.ai response")?;
+        resp_json
+            .pointer("/images/0/url")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .ok_or_else(|| anyhow::anyhow!("No image URL in fal.ai response"))
+    }
+
+    /// Generate via OpenRouter chat completions with `modalities: ["image"]`.
+    /// Works with models like `bytedance/seedream-4.5` or any OpenRouter
+    /// image-capable model.
+    async fn generate_via_openrouter(
+        &self,
+        client: &reqwest::Client,
+        api_key: &str,
+        model: &str,
+        prompt: &str,
+    ) -> anyhow::Result<String> {
+        let url = "https://openrouter.ai/api/v1/chat/completions";
+        let body = json!({
+            "model": model,
+            "messages": [{ "role": "user", "content": prompt }],
+            "modalities": ["image"],
+            "response_format": { "type": "url" }
+        });
+
+        let resp = client
+            .post(url)
+            .header("Authorization", format!("Bearer {api_key}"))
+            .header("Content-Type", "application/json")
+            .header("HTTP-Referer", "https://zeroclaw.dev")
+            .json(&body)
+            .send()
+            .await
+            .context("OpenRouter image gen request failed")?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body_text = resp.text().await.unwrap_or_default();
+            anyhow::bail!("OpenRouter API error ({status}): {body_text}");
+        }
+
+        let resp_json: serde_json::Value = resp.json().await.context("Failed to parse OpenRouter response")?;
+
+        // OpenRouter returns image URL in choices[0].message.content[0].image_url.url
+        // or as a data URI in choices[0].message.content
+        if let Some(url) = resp_json.pointer("/choices/0/message/content/0/image_url/url").and_then(|v| v.as_str()) {
+            return Ok(url.to_string());
+        }
+
+        // Fallback: check for direct URL string in content
+        if let Some(content) = resp_json.pointer("/choices/0/message/content").and_then(|v| v.as_str()) {
+            if content.starts_with("http") {
+                return Ok(content.to_string());
+            }
+        }
+
+        // Fallback: look for any URL in the response
+        if let Some(url) = resp_json.pointer("/data/0/url").and_then(|v| v.as_str()) {
+            return Ok(url.to_string());
+        }
+
+        anyhow::bail!("No image URL found in OpenRouter response: {resp_json}")
     }
 }
 
@@ -238,7 +263,8 @@ impl Tool for ImageGenTool {
     }
 
     fn description(&self) -> &str {
-        "Generate an image from a text prompt using fal.ai (Flux models). \
+        "Generate an image from a text prompt. Supports OpenRouter models \
+         (e.g. bytedance/seedream-4.5) and fal.ai (e.g. fal-ai/flux/schnell). \
          Saves the result to the workspace images directory and returns the file path."
     }
 

@@ -1776,6 +1776,22 @@ fn get_default_pricing() -> std::collections::HashMap<String, ModelPricing> {
         },
     );
 
+    // Google models (OpenRouter pricing)
+    prices.insert(
+        "google/gemini-3-flash-preview".into(),
+        ModelPricing {
+            input: 0.10,
+            output: 0.40,
+        },
+    );
+    prices.insert(
+        "google/gemini-2.5-flash-preview".into(),
+        ModelPricing {
+            input: 0.15,
+            output: 0.60,
+        },
+    );
+
     prices
 }
 
@@ -3264,11 +3280,11 @@ pub struct ImageGenConfig {
 }
 
 fn default_image_gen_model() -> String {
-    "fal-ai/flux/schnell".into()
+    "bytedance/seedream-4.5".into()
 }
 
 fn default_image_gen_api_key_env() -> String {
-    "FAL_API_KEY".into()
+    "API_KEY".into()
 }
 
 impl Default for ImageGenConfig {
