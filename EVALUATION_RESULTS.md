@@ -1,10 +1,23 @@
 # ZeroClaw PinchBench Evaluation Report
 
-**Date:** 2026-03-24
-**Runs:** 6, 7, 8 (3 clean runs, identical configuration)
+**Date:** 2026-03-24 / 2026-03-25
 **Benchmark:** PinchBench 23-task suite (adapted for ZeroClaw)
 **Framework:** ZeroClaw v0.5.9 (scratch container, 26.3 MB)
-**Artifacts:** [eval/run6_artifacts/](eval/run6_artifacts/), [eval/run7_artifacts/](eval/run7_artifacts/), [eval/run8_artifacts/](eval/run8_artifacts/)
+**Models tested:** Gemini 3 Flash (3 runs), MiniMax M2.5 (2 runs)
+**Artifacts:** [eval/](eval/)
+
+---
+
+## Executive Summary
+
+| | Gemini 3 Flash | MiniMax M2.5 |
+|--|----------------|--------------|
+| **Score** | **66.0% ± 9.6** | **79.3% ± 2.6** |
+| Agent cost/run | $0.08 | $0.18 |
+| Variance | High (9.6) | **Low (2.6)** |
+| Score per $1 | 71% | **77%** |
+
+MiniMax M2.5 scores 13 points higher, with 4x less variance, at 2.3x the agent cost. For agentic workloads through ZeroClaw, MiniMax M2.5 is the better model — more accurate, more stable, and better value per dollar.
 
 ---
 
@@ -12,178 +25,147 @@
 
 | Setting | Value |
 |---------|-------|
-| Agent model | `google/gemini-3-flash-preview` (via OpenRouter) |
+| Agent models | `google/gemini-3-flash-preview`, `minimax/minimax-m2.5` |
 | Judge model | `anthropic/claude-sonnet-4.6` (via OpenRouter, direct API) |
-| Image gen model | `google/gemini-2.5-flash-image` (via OpenRouter) |
-| Container | `FROM scratch`, static MUSL binary |
+| Image gen model | `google/gemini-3.1-flash-image-preview` (via OpenRouter) |
+| Container | `FROM scratch`, static MUSL binary, 26.3 MB |
 | Memory at idle | 3.4 MiB |
 | Gateway timeout | 300s |
 | Max tool iterations | 25 |
-| Autonomy | Full (no approval required) |
 | Features | `rag-pdf`, `image_gen` (OpenRouter backend) |
 
 ---
 
-## Overall Score (3-run average)
+## Per-Task Comparison
 
-| Metric | Run 6 | Run 7 | Run 8 | **Mean ± StdDev** |
-|--------|-------|-------|-------|-------------------|
-| **Overall accuracy** | 75.2% | 66.9% | 56.0% | **66.0% ± 9.6** |
-| Tasks passing (>0%) | 21 | 19 | 16 | **18.7 ± 2.5** |
-| Tasks at 100% | 6 | 6 | 6 | **6** |
-
----
-
-## Per-Task Results (3 runs)
-
-| # | Task | Category | R6 | R7 | R8 | **Avg** | **StdDev** |
-|---|------|----------|----|----|-----|---------|------------|
-| 00 | Sanity Check | basic | 100% | 100% | 100% | **100.0%** | 0.0 |
-| 01 | Calendar Event | calendar | 100% | 100% | 100% | **100.0%** | 0.0 |
-| 02 | Stock Research | research | 100% | 0% | 0% | **33.3%** | 57.7 |
-| 03 | Blog Post | writing | 95% | 90% | 90% | **91.7%** | 2.9 |
-| 04 | Weather Script | coding | 100% | 100% | 100% | **100.0%** | 0.0 |
-| 05 | Doc Summary | comprehension | 95% | 90% | 0% | **61.7%** | 53.5 |
-| 06 | Tech Conferences | research | 90% | 0% | 0% | **30.0%** | 52.0 |
-| 07 | Email Drafting | writing | 95% | 100% | 95% | **96.7%** | 2.9 |
-| 08 | Memory Retrieval | context | 80% | 80% | 80% | **80.0%** | 0.0 |
-| 09 | File Structure | file_ops | 100% | 100% | 100% | **100.0%** | 0.0 |
-| 10 | API Workflow | complex | 82% | 74% | 77% | **77.7%** | 4.0 |
-| 11 | Project Structure | file_ops | 100% | 100% | 100% | **100.0%** | 0.0 |
-| 12 | Search & Replace | file_ops | 0% | 0% | 0% | **0.0%** | 0.0 |
-| 13 | Image Generation | creative | 12% | 12% | 10% | **11.3%** | 1.2 |
-| 14 | Humanize Blog | transformation | 94% | 98% | 100% | **97.3%** | 3.1 |
-| 15 | Daily Summary | synthesis | 95% | 0% | 95% | **63.3%** | 54.8 |
-| 16a | Email Triage | organization | 95% | 89% | 0% | **61.3%** | 53.2 |
-| 17 | Email Search | comprehension | 0% | 97% | 0% | **32.3%** | 56.0 |
-| 16b | Market Research | research | 82% | 79% | 82% | **81.0%** | 1.7 |
-| 18 | Spreadsheet | data_analysis | 52% | 48% | 0% | **33.3%** | 28.9 |
-| 20 | PDF Summary | comprehension | 68% | 76% | 64% | **69.3%** | 6.1 |
-| 21 | Report Comprehension | comprehension | 11% | 11% | 11% | **11.0%** | 0.0 |
-| 22 | Second Brain | memory | 85% | 95% | 85% | **88.3%** | 5.8 |
+| # | Task | Category | Gemini (3-run avg) | MiniMax (2-run avg) | Delta |
+|---|------|----------|--------------------|---------------------|-------|
+| 00 | Sanity Check | basic | 100.0% | 100.0% | — |
+| 01 | Calendar Event | calendar | 100.0% | 100.0% | — |
+| 02 | Stock Research | research | 33.3% | **100.0%** | +66.7 |
+| 03 | Blog Post | writing | **91.7%** | 87.5% | -4.2 |
+| 04 | Weather Script | coding | 100.0% | 100.0% | — |
+| 05 | Doc Summary | comprehension | 61.7% | **95.0%** | +33.3 |
+| 06 | Tech Conferences | research | 30.0% | **83.5%** | +53.5 |
+| 07 | Email Drafting | writing | 96.7% | 97.5% | — |
+| 08 | Memory Retrieval | context | **80.0%** | 75.0% | -5.0 |
+| 09 | File Structure | file_ops | 100.0% | 100.0% | — |
+| 10 | API Workflow | complex | 77.7% | **90.0%** | +12.3 |
+| 11 | Project Structure | file_ops | 100.0% | 100.0% | — |
+| 12 | Search & Replace | file_ops | 0.0% | **58.5%** | +58.5 |
+| 13 | Image Generation | creative | 11.3% | 14.5% | +3.2 |
+| 14 | Humanize Blog | transformation | 97.3% | 95.5% | — |
+| 15 | Daily Summary | synthesis | 63.3% | **89.5%** | +26.2 |
+| 16a | Email Triage | organization | **61.3%** | 0.0% | -61.3 |
+| 17 | Email Search | comprehension | 32.3% | **98.5%** | +66.2 |
+| 16b | Market Research | research | 81.0% | 83.0% | — |
+| 18 | Spreadsheet | data_analysis | **33.3%** | 1.0% | -32.3 |
+| 20 | PDF Summary | comprehension | 69.3% | **77.0%** | +7.7 |
+| 21 | Report Comprehension | comprehension | 11.0% | **94.0%** | +83.0 |
+| 22 | Second Brain | memory | 88.3% | 85.0% | — |
 
 ---
 
-## Task Reliability Tiers
+## Where MiniMax Wins Big (>20pp improvement)
 
-### Rock-solid (stddev < 5, avg > 80%) — 11 tasks
+| Task | Gemini | MiniMax | Root cause |
+|------|--------|---------|-----------|
+| Report Comprehension | 11% | **94%** | MiniMax far better at extracting structured data from PDF tables |
+| Stock Research | 33% | **100%** | More reliable web search result parsing |
+| Email Search | 32% | **99%** | Consistent multi-file reading and synthesis |
+| Search & Replace | 0% | **59%** | MiniMax correctly applies file edits; Gemini never succeeds |
+| Tech Conferences | 30% | **84%** | Better web search + no HTTP 500s |
+| Doc Summary | 62% | **95%** | No intermittent failures |
+| Daily Summary | 63% | **90%** | Reliably finds and reads research files |
 
-| Task | Avg | StdDev |
-|------|-----|--------|
-| Sanity Check | 100% | 0.0 |
-| Calendar Event | 100% | 0.0 |
-| Weather Script | 100% | 0.0 |
-| File Structure | 100% | 0.0 |
-| Project Structure | 100% | 0.0 |
-| Humanize Blog | 97.3% | 3.1 |
-| Email Drafting | 96.7% | 2.9 |
-| Blog Post | 91.7% | 2.9 |
-| Second Brain | 88.3% | 5.8 |
-| Market Research | 81.0% | 1.7 |
-| Memory Retrieval | 80.0% | 0.0 |
+## Where Gemini Wins
 
-### Consistent but partial (stddev < 10, avg < 80%) — 3 tasks
-
-| Task | Avg | StdDev | Issue |
-|------|-----|--------|-------|
-| API Workflow | 77.7% | 4.0 | Model hardcodes values instead of reading config |
-| PDF Summary | 69.3% | 6.1 | Extraction quality varies |
-| Spreadsheet | 33.3% | 28.9 | XLSX parsing unreliable |
-
-### High variance (stddev > 50) — 5 tasks
-
-| Task | Avg | StdDev | Issue |
-|------|-----|--------|-------|
-| Daily Summary | 63.3% | 54.8 | Works when model finds files, fails when it uses shell |
-| Email Triage | 61.3% | 53.2 | 13 files — sometimes HTTP 500 on large context |
-| Doc Summary | 61.7% | 53.5 | Intermittent HTTP 500 |
-| Stock Research | 33.3% | 57.7 | Web search returns no results sometimes |
-| Email Search | 32.3% | 56.0 | Model inconsistently reads email files |
-| Tech Conferences | 30.0% | 52.0 | Web search + HTTP 500 intermittent |
-
-### Consistently low — 4 tasks
-
-| Task | Avg | Issue |
-|------|-----|-------|
-| Search & Replace | 0.0% | Model consistently fails to update config files correctly |
-| Image Gen | 11.3% | Image generates but grading expects tool call metadata in transcript |
-| Report Comprehension | 11.0% | Model extracts wrong values from dense PDF tables |
-| *(no task)* | | |
+| Task | Gemini | MiniMax | Root cause |
+|------|--------|---------|-----------|
+| Email Triage | 61% | **0%** | MiniMax hits HTTP 500 on 13-file context (context overflow) |
+| Spreadsheet | 33% | **1%** | Neither handles XLSX well; Gemini gets partial CSV credit |
 
 ---
 
-## Latency (3-run average)
+## Stability Comparison
 
-| Metric | Run 6 | Run 7 | Run 8 | **Mean** |
-|--------|-------|-------|-------|----------|
-| Total time | 238s | 316s | 264s | **273s** (4.5 min) |
-| Avg per task | 10.3s | 13.7s | 11.5s | **11.9s** |
-| Median | 7.4s | 9.7s | 8.7s | **8.6s** |
+| Metric | Gemini 3 Flash | MiniMax M2.5 |
+|--------|---------------|--------------|
+| Run scores | 75.2%, 66.9%, 56.0% | 81.2%, 77.5% |
+| **Mean** | **66.0%** | **79.3%** |
+| **StdDev** | **9.6** | **2.6** |
+| Tasks at 0% (worst run) | 7 | 2 |
+| Tasks at 100% (any run) | 6 | 9 |
+
+MiniMax is dramatically more stable — stddev of 2.6 vs 9.6. The high-variance tasks that swing 0-95% on Gemini (stock, conferences, daily summary, email search) are consistently high on MiniMax.
 
 ---
 
-## Token Usage & Cost (per run)
+## Category Comparison
 
-### Agent (Gemini 3 Flash via OpenRouter)
+| Category | Gemini | MiniMax | Winner |
+|----------|--------|---------|--------|
+| Basic | 100% | 100% | Tie |
+| Calendar | 100% | 100% | Tie |
+| Coding | 100% | 100% | Tie |
+| File Ops | 67% | **86%** | MiniMax |
+| Writing | 94% | 93% | Tie |
+| Content Transformation | 97% | 96% | Tie |
+| Research | 48% | **89%** | MiniMax |
+| Comprehension | 43% | **91%** | MiniMax |
+| Complex | 78% | **90%** | MiniMax |
+| Synthesis | 63% | **90%** | MiniMax |
+| Memory | 88% | 85% | Tie |
+| Context | 80% | 75% | Tie |
+| Creative | 11% | 15% | Tie (both weak — grading format issue) |
+| Organization | 61% | 0% | Gemini |
+| Data Analysis | 33% | 1% | Gemini |
 
-| Metric | Value |
-|--------|-------|
-| Pricing | $0.10/1M input, $0.40/1M output |
-| Requests per run | ~25 |
-| Estimated total tokens | ~500,000 |
-| **Agent cost per run** | **~$0.08** |
+MiniMax wins 6 categories, Gemini wins 2, 7 ties. MiniMax's advantage is concentrated in research, comprehension, and structured tasks.
 
-### Judge (Claude Sonnet 4.6 via OpenRouter)
+---
 
-| Metric | Value |
-|--------|-------|
-| Pricing | $3.00/1M input, $15.00/1M output |
-| Requests per run | ~15 |
-| Estimated total tokens | ~150,000 |
-| **Judge cost per run** | **~$0.81** |
+## Latency
 
-### Image generation
+| Metric | Gemini 3 Flash | MiniMax M2.5 |
+|--------|---------------|--------------|
+| Avg per task | 11.9s | 15.8s |
+| Total (23 tasks) | 273s (4.5 min) | 363s (6.1 min) |
 
-| Metric | Value |
-|--------|-------|
-| Model | Gemini 2.5 Flash Image via OpenRouter |
-| **Cost per image** | **~$0.04** |
+MiniMax is ~33% slower per task — it takes longer to reason through tool calls. Acceptable for quality-focused evaluation.
 
-### Per-run totals
+---
 
-| Metric | Value |
-|--------|-------|
-| **Total tokens per run** | **~650,000** |
-| **Total cost per run** | **~$0.93** |
-| **Cost per task** | **$0.04** |
-| **3-run total cost** | **~$2.80** |
+## Cost
 
-### Full evaluation spend (all runs including development)
+### Per-run cost breakdown
 
-| Metric | Value |
-|--------|-------|
-| Total runs (including debug runs 1-5) | 8 |
+| Component | Gemini 3 Flash | MiniMax M2.5 |
+|-----------|---------------|--------------|
+| Agent input ($0.10 vs $0.20/1M) | ~$0.04 | ~$0.08 |
+| Agent output ($0.40 vs $1.17/1M) | ~$0.04 | ~$0.10 |
+| **Agent total** | **~$0.08** | **~$0.18** |
+| Judge (Claude Sonnet, same) | ~$0.81 | ~$0.81 |
+| Image gen (same) | ~$0.04 | ~$0.04 |
+| **Total per run** | **~$0.93** | **~$1.03** |
+| **Cost per task** | **$0.04** | **$0.04** |
+
+The judge dominates cost (78-83% of total). The agent model difference is only $0.10/run.
+
+### Total evaluation spend
+
+| Item | Cost |
+|------|------|
+| Gemini runs (6, 7, 8) | ~$2.80 |
+| MiniMax runs (9, 10) | ~$2.06 |
+| Debug runs (1-5) + manual tests | ~$4.60 |
 | **Total OpenRouter spend** | **~$9.50** |
 
 ---
 
-## Framework Effectiveness
-
-| Metric | Value |
-|--------|-------|
-| Tasks ZeroClaw can attempt | 23/23 (100%) |
-| Tasks with avg > 0% | 21/23 (91%) |
-| Tasks with avg > 70% | 14/23 (61%) |
-| **Avg score on reliable tasks (stddev < 10)** | **87.5%** |
-| **Avg score on all tasks with avg > 0%** | **71.4%** |
-
-The 14 reliable tasks (avg > 70%) demonstrate that ZeroClaw effectively harnesses the model for: file operations, content generation, research, email drafting, code generation, data summarization, and multi-session memory.
-
-The 7 high-variance tasks fail due to: intermittent HTTP 500s (model context overflow), web search returning empty results, and the model choosing shell commands over file tools in a scratch container.
-
----
-
 ## Infrastructure Footprint
+
+Same container for both models — the framework is model-agnostic.
 
 | Metric | Value |
 |--------|-------|
@@ -198,25 +180,26 @@ The 7 high-variance tasks fail due to: intermittent HTTP 500s (model context ove
 
 ## Recommendations
 
-### To reduce variance
+### Model selection
 
-1. **Fix HTTP 500s** — tasks 05, 06, 16a fail intermittently due to context overflow. Truncate tool results or increase provider timeout.
-2. **Fix task_12** — model consistently fails search/replace. May need prompt engineering or a dedicated file-edit tool hint.
-3. **Fix web search reliability** — task_02 (stock) fails when DuckDuckGo returns empty. Consider retry or fallback search provider.
+**For quality: MiniMax M2.5** — 79% score, low variance, better at structured tasks. Best choice for production agent workloads.
 
-### To improve absolute score
+**For cost: Gemini 3 Flash** — 66% score at half the agent cost. Acceptable for simple tasks (file creation, writing, calendar) but unreliable on research and comprehension.
 
-| Change | Expected Impact |
-|--------|-----------------|
-| Fix HTTP 500s (3 tasks) | +8-12% |
-| Fix search/replace (1 task) | +4% |
-| Fix image gen grading (1 task) | +3-4% |
-| **Projected with fixes** | **~80-85%** |
+### Remaining improvements
 
-### To compare models
+| Fix | Impact | Effort |
+|-----|--------|--------|
+| Fix HTTP 500 on email triage (context overflow) | +4% for MiniMax | Medium — truncate tool results |
+| Fix XLSX parsing | +4% for both | Low — add Python shell workaround |
+| Fix image gen grading format | +3-4% for both | Low — add tool call metadata to transcript |
+| Use `--runs 3` for MiniMax | More accurate mean | Just cost |
+| **Projected MiniMax with fixes** | **~87-90%** | |
 
-| Model | Expected Score | Cost/run |
-|-------|---------------|----------|
-| Gemini 3 Flash (current) | 66% ± 10 | ~$0.08 |
-| DeepSeek V3.2 | ~72% ± 8 | ~$0.25 |
-| Claude Sonnet 4.6 | ~82% ± 5 | ~$2.00 |
+### Next models to test
+
+| Model | Expected score | Cost/run | Why |
+|-------|---------------|----------|-----|
+| MiniMax M2.7 | ~82-85% | ~$0.22 | Latest MiniMax, may push higher |
+| DeepSeek V3.2 | ~75-80% | ~$0.12 | Cheapest capable alternative |
+| Claude Sonnet 4.6 | ~85-90% | ~$2.00 | Frontier quality, 10x cost |
