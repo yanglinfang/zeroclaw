@@ -362,10 +362,22 @@ pub(crate) fn scrub_credentials(input: &str) -> String {
 /// Default trigger for auto-compaction when non-system message count exceeds this threshold.
 /// Prefer passing the config-driven value via `run_tool_call_loop`; this constant is only
 /// used when callers omit the parameter.
-const DEFAULT_MAX_HISTORY_MESSAGES: usize = 50;
+const DEFAULT_MAX_HISTORY_MESSAGES: usize = 30;
+
+/// Default maximum characters per tool result injected into context.
+/// Prevents context overflow when tools return large outputs.
+const DEFAULT_MAX_TOOL_RESULT_CHARS: usize = 8_000;
+
+/// Read the max tool result chars from env or return the default.
+fn max_tool_result_chars() -> usize {
+    std::env::var("ZEROCLAW_MAX_TOOL_RESULT_CHARS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_MAX_TOOL_RESULT_CHARS)
+}
 
 /// Keep this many most-recent non-system messages after compaction.
-const COMPACTION_KEEP_RECENT_MESSAGES: usize = 20;
+const COMPACTION_KEEP_RECENT_MESSAGES: usize = 12;
 
 /// Safety cap for compaction source transcript passed to the summarizer.
 const COMPACTION_MAX_SOURCE_CHARS: usize = 12_000;
@@ -3457,11 +3469,17 @@ pub(crate) async fn run_tool_call_loop(
                     }
                 }
             }
-            individual_results.push((tool_call_id, outcome.output.clone()));
+            let max_chars = max_tool_result_chars();
+            let trimmed_output = if max_chars > 0 && outcome.output.len() > max_chars {
+                truncate_with_ellipsis(&outcome.output, max_chars)
+            } else {
+                outcome.output.clone()
+            };
+            individual_results.push((tool_call_id, trimmed_output.clone()));
             let _ = writeln!(
                 tool_results,
                 "<tool_result name=\"{}\">\n{}\n</tool_result>",
-                tool_name, outcome.output
+                tool_name, trimmed_output
             );
         }
 

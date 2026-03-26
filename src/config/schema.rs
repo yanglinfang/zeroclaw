@@ -1292,6 +1292,12 @@ pub struct AgentConfig {
     /// Default: `[]` (no filtering — all tools included).
     #[serde(default)]
     pub tool_filter_groups: Vec<ToolFilterGroup>,
+    /// Maximum characters per tool result injected into context. Tool outputs
+    /// exceeding this limit are truncated with an ellipsis. Prevents context
+    /// overflow when tools return large outputs (e.g. reading multiple files).
+    /// `0` means unlimited. Default: `8000` (~2,000 tokens).
+    #[serde(default = "default_max_tool_result_chars")]
+    pub max_tool_result_chars: usize,
     /// Maximum characters for the assembled system prompt. When `> 0`, the prompt
     /// is truncated to this limit after assembly (keeping the top portion which
     /// contains identity and safety instructions). `0` means unlimited.
@@ -1320,6 +1326,10 @@ fn default_agent_tool_dispatcher() -> String {
     "auto".into()
 }
 
+fn default_max_tool_result_chars() -> usize {
+    8_000
+}
+
 fn default_max_system_prompt_chars() -> usize {
     0
 }
@@ -1335,6 +1345,7 @@ impl Default for AgentConfig {
             tool_dispatcher: default_agent_tool_dispatcher(),
             tool_call_dedup_exempt: Vec::new(),
             tool_filter_groups: Vec::new(),
+            max_tool_result_chars: default_max_tool_result_chars(),
             max_system_prompt_chars: default_max_system_prompt_chars(),
             thinking: crate::agent::thinking::ThinkingConfig::default(),
         }
@@ -9257,6 +9268,13 @@ impl Config {
                 if n > 0 {
                     self.agent.max_tool_iterations = n;
                 }
+            }
+        }
+
+        // Max tool result chars: ZEROCLAW_MAX_TOOL_RESULT_CHARS
+        if let Ok(val) = std::env::var("ZEROCLAW_MAX_TOOL_RESULT_CHARS") {
+            if let Ok(n) = val.parse::<usize>() {
+                self.agent.max_tool_result_chars = n;
             }
         }
 

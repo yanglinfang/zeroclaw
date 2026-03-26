@@ -6,6 +6,12 @@ use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+/// Maximum characters per search result snippet. Longer snippets are truncated.
+const SNIPPET_MAX_CHARS: usize = 200;
+
+/// Maximum total characters for all search results combined.
+const SEARCH_OUTPUT_MAX_CHARS: usize = 3_000;
+
 /// Web search tool for searching the internet.
 /// Supports multiple providers: DuckDuckGo (free), Brave (requires API key),
 /// SearXNG (self-hosted, requires instance URL).
@@ -172,21 +178,33 @@ impl WebSearchTool {
 
         let count = link_matches.len().min(self.max_results);
 
+        let mut total_chars = 0usize;
         for i in 0..count {
             let caps = &link_matches[i];
             let url_str = decode_ddg_redirect_url(&caps[1]);
             let title = strip_tags(&caps[2]);
 
-            lines.push(format!("{}. {}", i + 1, title.trim()));
-            lines.push(format!("   {}", url_str.trim()));
+            let mut entry = format!("{}. {}\n   {}", i + 1, title.trim(), url_str.trim());
 
-            // Add snippet if available
+            // Add snippet if available, truncated to SNIPPET_MAX_CHARS
             if i < snippet_matches.len() {
                 let snippet = strip_tags(&snippet_matches[i][1]);
                 let snippet = snippet.trim();
                 if !snippet.is_empty() {
-                    lines.push(format!("   {}", snippet));
+                    let truncated = if snippet.len() > SNIPPET_MAX_CHARS {
+                        format!("{}...", &snippet[..SNIPPET_MAX_CHARS])
+                    } else {
+                        snippet.to_string()
+                    };
+                    entry.push_str(&format!("\n   {}", truncated));
                 }
+            }
+
+            total_chars += entry.len();
+            lines.push(entry);
+
+            if total_chars >= SEARCH_OUTPUT_MAX_CHARS {
+                break;
             }
         }
 
@@ -233,6 +251,7 @@ impl WebSearchTool {
         }
 
         let mut lines = vec![format!("Search results for: {} (via Brave)", query)];
+        let mut total_chars = 0usize;
 
         for (i, result) in results.iter().take(self.max_results).enumerate() {
             let title = result
@@ -245,10 +264,21 @@ impl WebSearchTool {
                 .and_then(|d| d.as_str())
                 .unwrap_or("");
 
-            lines.push(format!("{}. {}", i + 1, title));
-            lines.push(format!("   {}", url));
+            let mut entry = format!("{}. {}\n   {}", i + 1, title, url);
             if !description.is_empty() {
-                lines.push(format!("   {}", description));
+                let truncated = if description.len() > SNIPPET_MAX_CHARS {
+                    format!("{}...", &description[..SNIPPET_MAX_CHARS])
+                } else {
+                    description.to_string()
+                };
+                entry.push_str(&format!("\n   {}", truncated));
+            }
+
+            total_chars += entry.len();
+            lines.push(entry);
+
+            if total_chars >= SEARCH_OUTPUT_MAX_CHARS {
+                break;
             }
         }
 
