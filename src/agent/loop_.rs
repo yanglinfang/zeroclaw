@@ -368,12 +368,28 @@ const DEFAULT_MAX_HISTORY_MESSAGES: usize = 30;
 /// Prevents context overflow when tools return large outputs.
 const DEFAULT_MAX_TOOL_RESULT_CHARS: usize = 8_000;
 
+/// Higher limit for tools that return large structured documents (e.g. PDF).
+const PDF_MAX_TOOL_RESULT_CHARS: usize = 32_000;
+
+/// Tools that get the higher truncation limit because they return
+/// single large documents where truncation loses critical information.
+const HIGH_LIMIT_TOOLS: &[&str] = &["pdf_read", "read_pdf"];
+
 /// Read the max tool result chars from env or return the default.
 fn max_tool_result_chars() -> usize {
     std::env::var("ZEROCLAW_MAX_TOOL_RESULT_CHARS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_MAX_TOOL_RESULT_CHARS)
+}
+
+/// Return the appropriate truncation limit for a given tool.
+fn tool_result_limit(tool_name: &str) -> usize {
+    if HIGH_LIMIT_TOOLS.iter().any(|&t| t == tool_name) {
+        PDF_MAX_TOOL_RESULT_CHARS
+    } else {
+        max_tool_result_chars()
+    }
 }
 
 /// Keep this many most-recent non-system messages after compaction.
@@ -3469,7 +3485,7 @@ pub(crate) async fn run_tool_call_loop(
                     }
                 }
             }
-            let max_chars = max_tool_result_chars();
+            let max_chars = tool_result_limit(&tool_name);
             let trimmed_output = if max_chars > 0 && outcome.output.len() > max_chars {
                 truncate_with_ellipsis(&outcome.output, max_chars)
             } else {
