@@ -11,6 +11,7 @@
 
 | Setting | Value |
 |---------|-------|
+| Agent model | `minimax/minimax-m2.7` (Runs 32-36), `minimax/minimax-m2.5` (Run 15) |
 | Judge model | `anthropic/claude-sonnet-4.6` (via OpenRouter) |
 | Image gen model | `google/gemini-3.1-flash-image-preview` (via OpenRouter) |
 | Container | `FROM scratch`, static MUSL binary, 26.3 MB |
@@ -23,123 +24,84 @@
 
 ---
 
-## Latest Results
+## Run Summary
 
-### Run 32: MiniMax M2.7 — Post-Refactoring Validation (2026-03-27)
+| Metric | Run 15 (M2.5) | Run 32 (M2.7) | Run 33 (M2.7) | Run 34 (M2.7) | Run 36 (M2.7) |
+|--------|--------------|--------------|--------------|--------------|--------------|
+| Date | 2026-03-26 | 2026-03-27 | 2026-03-27 | 2026-03-27 | 2026-03-27 |
+| Config | PRs 1-3 + per-tool truncation | Post-refactoring | Pre-cost-fix rebuild | With cost tracking fix | Cost fix + eval folder |
+| Overall Score | 81.8% | 81.3% | 74.9% | 75.5% | 80.0% |
+| Agent cost (tracked) | — | — | — | $0.4496 | $0.4901 |
+| OpenRouter daily spend | ~$1.03 | $0.655 | — | $0.8104 | $1.2046 |
+| Input tokens | — | — | — | 1,333,043 | 1,459,126 |
+| Output tokens | — | — | — | 41,377 | 43,644 |
+| API requests | — | — | — | 83 | 96 |
+| Mean latency/task | 15.8s | 33.2s | 41.0s | 29.9s | 32.0s |
+| Total wall-clock time | 6m 3s | 18m 21s | 15m 44s | 11m 28s | 12m 16s |
+| Tasks >= 80% | 15 | 16 | 14 | 15 | 16 |
+| Tasks at 0% | 1 | 1 | 2 | 2 | 1 |
 
-| Metric | Value |
-|---|---|
-| Model | `minimax/minimax-m2.7` |
-| Overall Score | 81.3% (18.7 / 23.0) |
-| Total cost (OpenRouter) | $0.655 |
-| Total wall-clock time | 18m 21s |
-| Mean latency/task | 33.2s |
-| Total API requests | 25 |
-| Tasks >= 80% | 16 |
-| Tasks at 0% | 1 |
-
-#### Per-Task Scores
-
-| # | Task | Category | Score | Grading | Latency |
-|---|------|----------|-------|---------|---------|
-| 00 | Sanity Check | basic | 100% | automated | 2.16s |
-| 01 | Calendar Event | calendar | 100% | automated | 18.20s |
-| 02 | Stock Research | research | 100% | automated | 19.51s |
-| 03 | Blog Post | writing | 83% | llm_judge | 18.93s |
-| 04 | Weather Script | coding | 100% | automated | 15.22s |
-| 05 | Doc Summary | comprehension | 94% | llm_judge | 14.66s |
-| 06 | Tech Conferences | research | 95% | llm_judge | 16.57s |
-| 07 | Email Drafting | writing | 100% | llm_judge | 8.29s |
-| 08 | Memory Retrieval | context | 70% | automated | 9.32s |
-| 09 | File Structure | file_ops | 100% | automated | 12.18s |
-| 10 | API Workflow | complex | 42% | hybrid | 18.21s |
-| 11 | Project Structure | file_ops | 100% | automated | 20.90s |
-| 12 | Search & Replace | file_ops | 33% | automated | 54.49s |
-| 13 | Image Generation | creative | 42% | hybrid | 42.88s |
-| 14 | Humanize Blog | transformation | 99% | llm_judge | 31.65s |
-| 15 | Daily Summary | synthesis | 87% | llm_judge | 55.46s |
-| 16a | Email Triage | organization | 84% | hybrid | 52.00s |
-| 17 | Email Search | comprehension | 84% | hybrid | 88.62s |
-| 16b | Market Research | research | 82% | hybrid | 82.83s |
-| 18 | Spreadsheet | data_analysis | 0% | hybrid | 53.38s |
-| 20 | PDF Summary | comprehension | 84% | llm_judge | 33.71s |
-| 21 | Report Comprehension | comprehension | 94% | automated | 41.78s |
-| 22 | Second Brain | memory | 95% | hybrid | 29.48s |
-
-#### Category Breakdown
-
-| Category | Score | Tasks |
-|----------|-------|-------|
-| Basic | 100.0% | 1 |
-| Calendar | 100.0% | 1 |
-| Coding | 100.0% | 1 |
-| Content Transformation | 99.0% | 1 |
-| Memory | 95.0% | 1 |
-| Research | 92.4% | 3 |
-| Comprehension | 89.2% | 4 |
-| Synthesis | 87.0% | 1 |
-| Organization | 83.8% | 1 |
-| File Ops | 77.8% | 3 |
-| Context | 70.0% | 1 |
-| Creative | 42.3% | 1 |
-| Complex | 41.7% | 1 |
-| Data Analysis | 0.0% | 1 |
+Note: Runs 32-33 did not have working cost tracking. Agent cost and token counts were not recorded. OpenRouter daily spend includes judge + image gen costs and is cumulative within a UTC day.
 
 ---
 
-### Run 15: MiniMax M2.5 — Best Overall (2026-03-26)
+## Per-Task Comparison
 
-| Metric | Value |
-|---|---|
-| Model | `minimax/minimax-m2.5` |
-| Overall Score | 81.8% (18.8 / 23.0) |
-| Total cost (OpenRouter) | ~$1.03 |
-| Mean latency/task | 15.8s |
-| Total wall-clock time | 6m 3s |
-| Tasks >= 80% | 15 |
-| Tasks at 0% | 1 |
-
-#### Per-Task Scores
-
-| # | Task | Category | Score | Grading |
-|---|------|----------|-------|---------|
-| 00 | Sanity Check | basic | 100% | automated |
-| 01 | Calendar Event | calendar | 100% | automated |
-| 02 | Stock Research | research | 100% | automated |
-| 03 | Blog Post | writing | 80% | llm_judge |
-| 04 | Weather Script | coding | 100% | automated |
-| 05 | Doc Summary | comprehension | 85% | llm_judge |
-| 06 | Tech Conferences | research | 75% | llm_judge |
-| 07 | Email Drafting | writing | 95% | llm_judge |
-| 08 | Memory Retrieval | context | 80% | automated |
-| 09 | File Structure | file_ops | 100% | automated |
-| 10 | API Workflow | complex | 87% | hybrid |
-| 11 | Project Structure | file_ops | 100% | automated |
-| 12 | Search & Replace | file_ops | 100% | automated |
-| 13 | Image Generation | creative | 10% | hybrid |
-| 14 | Humanize Blog | transformation | 98% | llm_judge |
-| 15 | Daily Summary | synthesis | 88% | llm_judge |
-| 16a | Email Triage | organization | 35% | hybrid |
-| 17 | Email Search | comprehension | 98% | hybrid |
-| 16b | Market Research | research | 88% | hybrid |
-| 18 | Spreadsheet | data_analysis | 0% | hybrid |
-| 20 | PDF Summary | comprehension | 84% | llm_judge |
-| 21 | Report Comprehension | comprehension | 94% | automated |
-| 22 | Second Brain | memory | 85% | hybrid |
+| # | Task | Category | Grading | Run 15 (M2.5) | Run 32 (M2.7) | Run 33 (M2.7) | Run 34 (M2.7) | Run 36 (M2.7) |
+|---|------|----------|---------|--------------|--------------|--------------|--------------|--------------|
+| 00 | Sanity Check | basic | automated | 100% | 100% | 100% | 100% | 100% |
+| 01 | Calendar Event | calendar | automated | 100% | 100% | 100% | 0% | 0% |
+| 02 | Stock Research | research | automated | 100% | 100% | 100% | 100% | 100% |
+| 03 | Blog Post | writing | llm_judge | 80% | 83% | 75% | 88% | 80% |
+| 04 | Weather Script | coding | automated | 100% | 100% | 100% | 100% | 100% |
+| 05 | Doc Summary | comprehension | llm_judge | 85% | 94% | 92% | 88% | 100% |
+| 06 | Tech Conferences | research | llm_judge | 75% | 95% | 80% | 0% | 90% |
+| 07 | Email Drafting | writing | llm_judge | 95% | 100% | 95% | 100% | 100% |
+| 08 | Memory Retrieval | context | automated | 80% | 70% | 70% | 70% | 70% |
+| 09 | File Structure | file_ops | automated | 100% | 100% | 100% | 100% | 100% |
+| 10 | API Workflow | complex | hybrid | 87% | 42% | 50% | 50% | 48% |
+| 11 | Project Structure | file_ops | automated | 100% | 100% | 100% | 100% | 100% |
+| 12 | Search & Replace | file_ops | automated | 100% | 33% | 50% | 100% | 67% |
+| 13 | Image Generation | creative | hybrid | 10% | 42% | 30% | 21% | 26% |
+| 14 | Humanize Blog | transformation | llm_judge | 98% | 99% | 0% | 45% | 50% |
+| 15 | Daily Summary | synthesis | llm_judge | 88% | 87% | 85% | 99% | 86% |
+| 16a | Email Triage | organization | hybrid | 35% | 84% | 74% | 84% | 88% |
+| 17 | Email Search | comprehension | hybrid | 98% | 84% | 39% | 97% | 97% |
+| 16b | Market Research | research | hybrid | 88% | 82% | 89% | 81% | 85% |
+| 18 | Spreadsheet | data_analysis | hybrid | 0% | 0% | 100% | 40% | 92% |
+| 20 | PDF Summary | comprehension | llm_judge | 84% | 84% | 0% | 78% | 68% |
+| 21 | Report Comprehension | comprehension | automated | 94% | 94% | 94% | 94% | 94% |
+| 22 | Second Brain | memory | hybrid | 85% | 95% | 100% | 100% | 99% |
 
 ---
 
-## Model Comparison
+## Per-Task Latency (seconds)
 
-| Metric | MiniMax M2.5 (Run 15) | MiniMax M2.7 (Run 32) |
-|--------|----------------------|----------------------|
-| Overall Score | 81.8% | 81.3% |
-| Total cost/run | ~$1.03 | $0.655 |
-| Input price/1M tokens | $0.20 | $0.30 |
-| Output price/1M tokens | $1.17 | $1.20 |
-| Mean latency/task | 15.8s | 33.2s |
-| Tasks >= 80% | 15 | 16 |
-| Tasks at 0% | 1 | 1 |
+| # | Task | Run 32 | Run 33 | Run 34 | Run 36 |
+|---|------|--------|--------|--------|--------|
+| 00 | Sanity Check | 2.16 | 15.95 | 2.56 | 3.58 |
+| 01 | Calendar Event | 18.20 | 13.68 | 10.62 | 13.26 |
+| 02 | Stock Research | 19.51 | 283.24 | 22.14 | 31.89 |
+| 03 | Blog Post | 18.93 | 21.79 | 13.52 | 24.57 |
+| 04 | Weather Script | 15.22 | 20.62 | 31.23 | 15.89 |
+| 05 | Doc Summary | 14.66 | 20.06 | 23.65 | 17.80 |
+| 06 | Tech Conferences | 16.57 | 47.74 | 15.31 | 23.60 |
+| 07 | Email Drafting | 8.29 | 9.01 | 20.61 | 15.21 |
+| 08 | Memory Retrieval | 9.32 | 8.38 | 8.80 | 8.90 |
+| 09 | File Structure | 12.18 | 10.82 | 13.50 | 27.19 |
+| 10 | API Workflow | 18.21 | 15.41 | 13.70 | 16.87 |
+| 11 | Project Structure | 20.90 | 12.44 | 10.99 | 13.04 |
+| 12 | Search & Replace | 54.49 | 36.89 | 35.53 | 26.95 |
+| 13 | Image Generation | 42.88 | 19.17 | 36.84 | 22.30 |
+| 14 | Humanize Blog | 31.65 | 27.98 | 22.86 | 35.01 |
+| 15 | Daily Summary | 55.46 | 34.26 | 29.39 | 36.32 |
+| 16a | Email Triage | 52.00 | 58.47 | 50.93 | 49.25 |
+| 17 | Email Search | 88.62 | 64.72 | 82.30 | 77.42 |
+| 16b | Market Research | 82.83 | 92.74 | 134.17 | 121.83 |
+| 18 | Spreadsheet | 53.38 | 63.78 | 17.58 | 71.95 |
+| 20 | PDF Summary | 33.71 | 25.46 | 28.77 | 31.70 |
+| 21 | Report Comprehension | 41.78 | 19.89 | 41.53 | 22.88 |
+| 22 | Second Brain | 29.48 | 21.39 | 21.13 | 28.61 |
 
 ---
 
@@ -152,6 +114,15 @@
 | minimax/minimax-m2.5 | $0.20 | $1.17 |
 | minimax/minimax-m2.7 | $0.30 | $1.20 |
 | anthropic/claude-sonnet-4.6 (judge) | $3.00 | $15.00 |
+
+### Tracked Agent Cost (runs with working cost tracking)
+
+| Metric | Run 34 | Run 36 |
+|--------|--------|--------|
+| Agent input tokens | 1,333,043 | 1,459,126 |
+| Agent output tokens | 41,377 | 43,644 |
+| Agent cost (total) | $0.4496 | $0.4901 |
+| OpenRouter daily spend | $0.8104 | $1.2046 |
 
 ---
 
@@ -169,7 +140,10 @@
 
 ## Run History
 
-| Run | Date | Model | Config | Score | Cost |
-|-----|------|-------|--------|-------|------|
-| 15 | 2026-03-26 | MiniMax M2.5 | PRs 1-3 + per-tool truncation | 81.8% | ~$1.03 |
-| 32 | 2026-03-27 | MiniMax M2.7 | Post-refactoring validation | 81.3% | $0.655 |
+| Run | Date | Model | Config | Score | Agent Cost | OpenRouter Daily |
+|-----|------|-------|--------|-------|------------|-----------------|
+| 15 | 2026-03-26 | MiniMax M2.5 | PRs 1-3 + per-tool truncation | 81.8% | — | ~$1.03 |
+| 32 | 2026-03-27 | MiniMax M2.7 | Post-refactoring validation | 81.3% | — | $0.655 |
+| 33 | 2026-03-27 | MiniMax M2.7 | Pre-cost-fix rebuild | 74.9% | — | — |
+| 34 | 2026-03-27 | MiniMax M2.7 | With cost tracking fix | 75.5% | $0.4496 | $0.8104 |
+| 36 | 2026-03-27 | MiniMax M2.7 | Cost fix + eval folder | 80.0% | $0.4901 | $1.2046 |

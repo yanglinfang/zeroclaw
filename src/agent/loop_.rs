@@ -2485,26 +2485,42 @@ pub async fn process_message(
         excluded_tools.extend(config.autonomy.non_cli_excluded_tools.iter().cloned());
     }
 
-    agent_turn(
-        provider.as_ref(),
-        &mut history,
-        &tools_registry,
-        observer.as_ref(),
-        provider_name,
-        &model_name,
-        effective_temperature,
-        true,
-        "daemon",
-        None,
-        &config.multimodal,
-        config.agent.max_tool_iterations,
-        Some(&approval_manager),
-        &excluded_tools,
-        &config.agent.tool_call_dedup_exempt,
-        activated_handle_pm.as_ref(),
-        None,
+    // Scope cost tracking context so tool-loop calls record token usage + cost.
+    let cost_ctx = crate::cost::CostTracker::get_or_init_global(
+        config.cost.clone(),
+        &config.workspace_dir,
     )
-    .await
+    .map(|tracker| {
+        crate::agent::cost_tracking::ToolLoopCostTrackingContext::new(
+            tracker,
+            std::sync::Arc::new(config.cost.prices.clone()),
+        )
+    });
+
+    crate::agent::cost_tracking::TOOL_LOOP_COST_TRACKING_CONTEXT
+        .scope(
+            cost_ctx,
+            agent_turn(
+                provider.as_ref(),
+                &mut history,
+                &tools_registry,
+                observer.as_ref(),
+                provider_name,
+                &model_name,
+                effective_temperature,
+                true,
+                "daemon",
+                None,
+                &config.multimodal,
+                config.agent.max_tool_iterations,
+                Some(&approval_manager),
+                &excluded_tools,
+                &config.agent.tool_call_dedup_exempt,
+                activated_handle_pm.as_ref(),
+                None,
+            ),
+        )
+        .await
 }
 
 #[cfg(test)]

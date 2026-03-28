@@ -1,0 +1,130 @@
+{
+  "model": "openrouter/minimax/minimax-m2.7",
+  "benchmark_version": "b63f882",
+  "run_id": "0035",
+  "timestamp": 1774670419.0194151,
+  "suite": "task_01_calendar,task_06_events",
+  "runs_per_task": 1,
+  "tasks": [
+    {
+      "task_id": "task_01_calendar",
+      "status": "success",
+      "timed_out": false,
+      "execution_time": 13.915749788284302,
+      "transcript_length": 2,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "cost_usd": 0.0,
+        "request_count": 1
+      },
+      "workspace": "/tmp/pinchbench/workspace",
+      "grading": {
+        "runs": [
+          {
+            "task_id": "task_01_calendar",
+            "score": 1.0,
+            "max_score": 1.0,
+            "grading_type": "automated",
+            "breakdown": {
+              "file_created": 1.0,
+              "attendee_present": 1.0,
+              "title_correct": 1.0,
+              "description_present": 1.0,
+              "time_correct": 1.0,
+              "date_correct": 1.0
+            },
+            "notes": ""
+          }
+        ],
+        "mean": 1.0,
+        "std": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "frontmatter": {
+        "id": "task_01_calendar",
+        "name": "Calendar Event Creation",
+        "category": "calendar",
+        "grading_type": "automated",
+        "timeout_seconds": 120,
+        "workspace_files": []
+      }
+    },
+    {
+      "task_id": "task_06_events",
+      "status": "success",
+      "timed_out": false,
+      "execution_time": 17.683976888656616,
+      "transcript_length": 2,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "cost_usd": 0.0,
+        "request_count": 1
+      },
+      "workspace": "/tmp/pinchbench/workspace",
+      "grading": {
+        "runs": [
+          {
+            "task_id": "task_06_events",
+            "score": 0.98,
+            "max_score": 1.0,
+            "grading_type": "llm_judge",
+            "breakdown": {
+              "Information_Accuracy": 1.0,
+              "Completeness": 1.0,
+              "Relevance_and_Quality": 1.0,
+              "Formatting_and_Presentation": 0.9,
+              "Task_Completion": 1.0
+            },
+            "notes": "All 5 conferences are real, verifiable tech events (e.g., CES 2026, Gartner IT Symposium, TechCrunch Disrupt, etc.) with accurate dates in the future. Complete information for all entries including specific dates, exact locations, and valid URLs. Good variety of major industry events. Formatting is excellent with markdown table, though minor inconsistency in URL formatting (some with https:// prefix, one without). Task fully completed."
+          }
+        ],
+        "mean": 0.98,
+        "std": 0.0,
+        "min": 0.98,
+        "max": 0.98
+      },
+      "frontmatter": {
+        "id": "task_06_events",
+        "name": "Tech Conference Research",
+        "category": "research",
+        "grading_type": "llm_judge",
+        "timeout_seconds": 300,
+        "workspace_files": []
+      }
+    }
+  ],
+  "efficiency": {
+    "total_tokens": 0,
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "total_cost_usd": 0.0,
+    "total_requests": 2,
+    "total_execution_time_seconds": 31.6,
+    "tasks_with_usage_data": 0,
+    "tokens_per_task": 0.0,
+    "cost_per_task_usd": 0.0,
+    "score_per_1k_tokens": null,
+    "score_per_dollar": null,
+    "per_task": [
+      {
+        "task_id": "task_01_calendar",
+        "score": 1.0,
+        "total_tokens": 0,
+        "cost_usd": 0.0,
+        "tokens_per_score_point": 0.0
+      },
+      {
+        "task_id": "task_06_events",
+        "score": 0.98,
+        "total_tokens": 0,
+        "cost_usd": 0.0,
+        "tokens_per_score_point": 0.0
+      }
+    ]
+  }
+}

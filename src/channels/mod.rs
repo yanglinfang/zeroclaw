@@ -3309,7 +3309,9 @@ pub fn build_system_prompt_with_mode_and_autonomy(
     // ── 4. Workspace ────────────────────────────────────────────
     let _ = writeln!(
         prompt,
-        "## Workspace\n\nWorking directory: `{}`\n",
+        "## Workspace\n\nWorking directory: `{}`\n\
+         All file operations use this directory as the root. \
+         Write files directly here (e.g. `example.txt`), not into a subdirectory called `workspace/`.\n",
         workspace_dir.display()
     );
 

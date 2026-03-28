@@ -1646,7 +1646,7 @@ pub struct CostConfig {
     pub allow_override: bool,
 
     /// Per-model pricing (USD per 1M tokens)
-    #[serde(default)]
+    #[serde(default = "get_default_pricing")]
     pub prices: std::collections::HashMap<String, ModelPricing>,
 }
 
@@ -8101,6 +8101,19 @@ impl Config {
             // add it to `always_ask`, which takes precedence over
             // `auto_approve` in the approval decision (see approval/mod.rs).
             config.autonomy.ensure_default_auto_approve();
+
+            // Ensure built-in model pricing entries are always present.
+            // When the TOML has a `[cost]` section without `prices`, serde
+            // gives an empty HashMap.  Merge defaults so cost tracking works
+            // out-of-the-box for known models.
+            if config.cost.prices.is_empty() {
+                config.cost.prices = get_default_pricing();
+            } else {
+                // Merge: user entries win, defaults fill gaps.
+                for (model, pricing) in get_default_pricing() {
+                    config.cost.prices.entry(model).or_insert(pricing);
+                }
+            }
 
             // Detect unknown/ignored config keys for diagnostic warnings.
             // This second pass uses serde_ignored but discards the parsed
