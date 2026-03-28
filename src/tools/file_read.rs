@@ -24,7 +24,7 @@ impl Tool for FileReadTool {
     }
 
     fn description(&self) -> &str {
-        "Read file contents with line numbers. Supports partial reading via offset and limit. Extracts text from PDF; other binary files are read with lossy UTF-8 conversion."
+        "Read file contents with line numbers. Supports partial reading via offset and limit. Extracts text from PDF files and tabular data from Excel/XLSX spreadsheets (multi-sheet). Other binary files are read with lossy UTF-8 conversion."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -204,6 +204,25 @@ impl Tool for FileReadTool {
                     });
                 }
 
+                // Try XLSX extraction for spreadsheet files.
+                let path_lower = resolved_path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_lowercase();
+                if matches!(
+                    path_lower.as_str(),
+                    "xlsx" | "xls" | "xlsm" | "xlsb" | "ods"
+                ) {
+                    if let Some(text) = try_extract_spreadsheet_text(&resolved_path) {
+                        return Ok(ToolResult {
+                            success: true,
+                            output: text,
+                            error: None,
+                        });
+                    }
+                }
+
                 // Lossy fallback — replaces invalid bytes with U+FFFD
                 let lossy = String::from_utf8_lossy(&bytes).into_owned();
                 Ok(ToolResult {
@@ -230,6 +249,90 @@ fn try_extract_pdf_text(bytes: &[u8]) -> Option<String> {
 
 #[cfg(not(feature = "rag-pdf"))]
 fn try_extract_pdf_text(_bytes: &[u8]) -> Option<String> {
+    None
+}
+
+/// Extract tabular text from an Excel/ODS spreadsheet using calamine.
+///
+/// Returns each sheet as a section with headers, rows rendered as pipe-delimited
+/// tables for easy LLM consumption.
+#[cfg(feature = "rag-xlsx")]
+fn try_extract_spreadsheet_text(path: &std::path::Path) -> Option<String> {
+    use calamine::{open_workbook_auto, Data, Reader};
+    use std::fmt::Write;
+
+    let mut workbook = open_workbook_auto(path).ok()?;
+    let sheet_names: Vec<String> = workbook.sheet_names().to_vec();
+
+    if sheet_names.is_empty() {
+        return None;
+    }
+
+    let mut output = String::new();
+
+    for sheet_name in &sheet_names {
+        let range = match workbook.worksheet_range(sheet_name) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+
+        let _ = writeln!(output, "## Sheet: {sheet_name}\n");
+
+        let rows: Vec<Vec<String>> = range
+            .rows()
+            .map(|row| {
+                row.iter()
+                    .map(|cell| match cell {
+                        Data::Empty => String::new(),
+                        Data::String(s) => s.clone(),
+                        Data::Float(f) => {
+                            // Render whole numbers without decimal point for cleaner output
+                            if f.fract() == 0.0 && f.abs() < 1e15 {
+                                format!("{}", *f as i64)
+                            } else {
+                                format!("{f}")
+                            }
+                        }
+                        Data::Int(i) => format!("{i}"),
+                        Data::Bool(b) => format!("{b}"),
+                        Data::Error(e) => format!("#ERR({e:?})"),
+                        Data::DateTime(dt) => format!("{dt}"),
+                        Data::DateTimeIso(s) => s.clone(),
+                        Data::DurationIso(s) => s.clone(),
+                    })
+                    .collect()
+            })
+            .collect();
+
+        if rows.is_empty() {
+            let _ = writeln!(output, "(empty sheet)\n");
+            continue;
+        }
+
+        // Render as pipe-delimited table (markdown-style)
+        for (i, row) in rows.iter().enumerate() {
+            let line: String = row.join(" | ");
+            let _ = writeln!(output, "| {line} |");
+            // Add separator after header row
+            if i == 0 {
+                let sep: Vec<&str> = row.iter().map(|_| "---").collect();
+                let sep_line: String = sep.join(" | ");
+                let _ = writeln!(output, "| {sep_line} |");
+            }
+        }
+
+        let _ = writeln!(output);
+    }
+
+    if output.trim().is_empty() {
+        return None;
+    }
+
+    Some(output)
+}
+
+#[cfg(not(feature = "rag-xlsx"))]
+fn try_extract_spreadsheet_text(_path: &std::path::Path) -> Option<String> {
     None
 }
 

@@ -10,8 +10,14 @@ const MAX_PDF_BYTES: u64 = 50 * 1024 * 1024;
 const DEFAULT_MAX_CHARS: usize = 50_000;
 /// Hard ceiling regardless of what the caller requests.
 const MAX_OUTPUT_CHARS: usize = 200_000;
+/// Timeout for downloading remote PDFs.
+const DOWNLOAD_TIMEOUT_SECS: u64 = 60;
 
-/// Extract plain text from a PDF file in the workspace.
+/// Extract plain text from a PDF file or URL.
+///
+/// Accepts either a local file path (resolved from workspace) or an HTTP/HTTPS
+/// URL pointing to a PDF. When given a URL the file is downloaded to a temporary
+/// location inside the workspace before extraction.
 ///
 /// PDF extraction requires the `rag-pdf` feature flag:
 ///   cargo build --features rag-pdf
@@ -26,6 +32,136 @@ impl PdfReadTool {
     pub fn new(security: Arc<SecurityPolicy>) -> Self {
         Self { security }
     }
+
+    /// Returns `true` if the input looks like a remote URL rather than a local path.
+    fn is_url(path: &str) -> bool {
+        path.starts_with("http://") || path.starts_with("https://")
+    }
+
+    /// Download a remote PDF to a temporary file in the workspace.
+    /// Returns the local path on success.
+    async fn download_pdf_to_workspace(&self, url: &str) -> Result<std::path::PathBuf, ToolResult> {
+        use std::time::Duration;
+
+        // Build a restrictive HTTP client — no cookies, short timeout, size-limited.
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(DOWNLOAD_TIMEOUT_SECS))
+            .redirect(reqwest::redirect::Policy::limited(10))
+            .user_agent("ZeroClaw/0.5 pdf_read")
+            .build()
+            .map_err(|e| ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some(format!("Failed to build HTTP client: {e}")),
+            })?;
+
+        let resp = client.get(url).send().await.map_err(|e| ToolResult {
+            success: false,
+            output: String::new(),
+            error: Some(format!("Failed to download PDF from URL: {e}")),
+        })?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some(format!("PDF download failed with HTTP {status} from {url}")),
+            });
+        }
+
+        // Verify content-type looks PDF-ish (or accept octet-stream which many
+        // servers use for binary downloads).
+        if let Some(ct) = resp.headers().get(reqwest::header::CONTENT_TYPE) {
+            let ct_str = ct.to_str().unwrap_or("");
+            if !ct_str.is_empty() && !ct_str.contains("pdf") && !ct_str.contains("octet-stream") {
+                return Err(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some(format!(
+                        "URL does not appear to serve a PDF (content-type: {ct_str})"
+                    )),
+                });
+            }
+        }
+
+        // Check Content-Length header if present (early reject for oversized files).
+        if let Some(cl) = resp.content_length() {
+            if cl > MAX_PDF_BYTES {
+                return Err(ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some(format!(
+                        "Remote PDF too large: {cl} bytes (limit: {MAX_PDF_BYTES} bytes)"
+                    )),
+                });
+            }
+        }
+
+        // Stream the body with a size cap.
+        let bytes = resp.bytes().await.map_err(|e| ToolResult {
+            success: false,
+            output: String::new(),
+            error: Some(format!("Failed to read PDF response body: {e}")),
+        })?;
+
+        if bytes.len() as u64 > MAX_PDF_BYTES {
+            return Err(ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some(format!(
+                    "Downloaded PDF too large: {} bytes (limit: {MAX_PDF_BYTES} bytes)",
+                    bytes.len()
+                )),
+            });
+        }
+
+        // Minimal PDF magic-number check.
+        if !bytes.starts_with(b"%PDF") {
+            return Err(ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some(
+                    "Downloaded file does not appear to be a PDF (missing %PDF header)".into(),
+                ),
+            });
+        }
+
+        // Write to workspace/.pdf_downloads/<hash>.pdf so the file is inside the
+        // workspace boundary and the existing path-security checks remain valid.
+        let hash = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            url.hash(&mut h);
+            h.finish()
+        };
+        let download_dir = self.security.workspace_dir.join(".pdf_downloads");
+        tokio::fs::create_dir_all(&download_dir)
+            .await
+            .map_err(|e| ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some(format!("Failed to create download directory: {e}")),
+            })?;
+
+        let local_path = download_dir.join(format!("{hash:016x}.pdf"));
+        tokio::fs::write(&local_path, &bytes)
+            .await
+            .map_err(|e| ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some(format!("Failed to write downloaded PDF: {e}")),
+            })?;
+
+        tracing::info!(
+            "Downloaded PDF from {} → {} ({} bytes)",
+            url,
+            local_path.display(),
+            bytes.len()
+        );
+
+        Ok(local_path)
+    }
 }
 
 #[async_trait]
@@ -35,7 +171,9 @@ impl Tool for PdfReadTool {
     }
 
     fn description(&self) -> &str {
-        "Extract plain text from a PDF file in the workspace. \
+        "Extract plain text from a PDF file or URL. \
+         Accepts a local file path OR an http/https URL pointing to a PDF. \
+         Remote PDFs are downloaded automatically (max 50 MB). \
          Returns all readable text. Image-only or encrypted PDFs return an empty result. \
          Requires the 'rag-pdf' build feature."
     }
@@ -46,7 +184,9 @@ impl Tool for PdfReadTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Path to the PDF file. Relative paths resolve from workspace; outside paths require policy allowlist."
+                    "description": "Path to the PDF file, or an HTTP/HTTPS URL to a remote PDF. \
+                                    Local relative paths resolve from workspace; outside paths \
+                                    require policy allowlist. URLs are downloaded automatically."
                 },
                 "max_chars": {
                     "type": "integer",
@@ -83,15 +223,7 @@ impl Tool for PdfReadTool {
             });
         }
 
-        if !self.security.is_path_allowed(path) {
-            return Ok(ToolResult {
-                success: false,
-                output: String::new(),
-                error: Some(format!("Path not allowed by security policy: {path}")),
-            });
-        }
-
-        // Record action before canonicalization so path-probing still consumes budget.
+        // Record action — counts toward budget whether local or remote.
         if !self.security.record_action() {
             return Ok(ToolResult {
                 success: false,
@@ -100,62 +232,92 @@ impl Tool for PdfReadTool {
             });
         }
 
-        let full_path = self.security.resolve_tool_path(path);
+        // ── URL path: download to workspace first ──────────────────────
+        let bytes = if Self::is_url(path) {
+            tracing::info!("pdf_read: downloading remote PDF from {}", path);
 
-        let resolved_path = match tokio::fs::canonicalize(&full_path).await {
-            Ok(p) => p,
-            Err(e) => {
-                return Ok(ToolResult {
-                    success: false,
-                    output: String::new(),
-                    error: Some(format!("Failed to resolve file path: {e}")),
-                });
-            }
-        };
+            let local_path = match self.download_pdf_to_workspace(path).await {
+                Ok(p) => p,
+                Err(tool_result) => return Ok(tool_result),
+            };
 
-        if !self.security.is_resolved_path_allowed(&resolved_path) {
-            return Ok(ToolResult {
-                success: false,
-                output: String::new(),
-                error: Some(
-                    self.security
-                        .resolved_path_violation_message(&resolved_path),
-                ),
-            });
-        }
-
-        tracing::debug!("Reading PDF: {}", resolved_path.display());
-
-        match tokio::fs::metadata(&resolved_path).await {
-            Ok(meta) => {
-                if meta.len() > MAX_PDF_BYTES {
+            match tokio::fs::read(&local_path).await {
+                Ok(b) => b,
+                Err(e) => {
                     return Ok(ToolResult {
                         success: false,
                         output: String::new(),
-                        error: Some(format!(
-                            "PDF too large: {} bytes (limit: {MAX_PDF_BYTES} bytes)",
-                            meta.len()
-                        )),
+                        error: Some(format!("Failed to read downloaded PDF: {e}")),
                     });
                 }
             }
-            Err(e) => {
+        } else {
+            // ── Local path: existing security checks ───────────────────
+            if !self.security.is_path_allowed(path) {
                 return Ok(ToolResult {
                     success: false,
                     output: String::new(),
-                    error: Some(format!("Failed to read file metadata: {e}")),
+                    error: Some(format!("Path not allowed by security policy: {path}")),
                 });
             }
-        }
 
-        let bytes = match tokio::fs::read(&resolved_path).await {
-            Ok(b) => b,
-            Err(e) => {
+            let full_path = self.security.resolve_tool_path(path);
+
+            let resolved_path = match tokio::fs::canonicalize(&full_path).await {
+                Ok(p) => p,
+                Err(e) => {
+                    return Ok(ToolResult {
+                        success: false,
+                        output: String::new(),
+                        error: Some(format!("Failed to resolve file path: {e}")),
+                    });
+                }
+            };
+
+            if !self.security.is_resolved_path_allowed(&resolved_path) {
                 return Ok(ToolResult {
                     success: false,
                     output: String::new(),
-                    error: Some(format!("Failed to read PDF file: {e}")),
+                    error: Some(
+                        self.security
+                            .resolved_path_violation_message(&resolved_path),
+                    ),
                 });
+            }
+
+            tracing::debug!("Reading PDF: {}", resolved_path.display());
+
+            match tokio::fs::metadata(&resolved_path).await {
+                Ok(meta) => {
+                    if meta.len() > MAX_PDF_BYTES {
+                        return Ok(ToolResult {
+                            success: false,
+                            output: String::new(),
+                            error: Some(format!(
+                                "PDF too large: {} bytes (limit: {MAX_PDF_BYTES} bytes)",
+                                meta.len()
+                            )),
+                        });
+                    }
+                }
+                Err(e) => {
+                    return Ok(ToolResult {
+                        success: false,
+                        output: String::new(),
+                        error: Some(format!("Failed to read file metadata: {e}")),
+                    });
+                }
+            }
+
+            match tokio::fs::read(&resolved_path).await {
+                Ok(b) => b,
+                Err(e) => {
+                    return Ok(ToolResult {
+                        success: false,
+                        output: String::new(),
+                        error: Some(format!("Failed to read PDF file: {e}")),
+                    });
+                }
             }
         };
 

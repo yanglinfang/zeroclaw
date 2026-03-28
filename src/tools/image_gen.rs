@@ -90,7 +90,11 @@ impl ImageGenTool {
             .unwrap_or(&self.default_model);
 
         // Validate model identifier: reject path traversal.
-        if model.contains("..") || model.contains('?') || model.contains('#') || model.contains('\\') {
+        if model.contains("..")
+            || model.contains('?')
+            || model.contains('#')
+            || model.contains('\\')
+        {
             return Ok(ToolResult {
                 success: false,
                 output: String::new(),
@@ -113,20 +117,32 @@ impl ImageGenTool {
         // ── Route to backend ───────────────────────────────────────
         let client = Self::http_client();
         let image_url = if Self::is_openrouter_model(model) {
-            self.generate_via_openrouter(&client, &api_key, model, &prompt).await?
+            self.generate_via_openrouter(&client, &api_key, model, &prompt)
+                .await?
         } else {
-            let size = args.get("size").and_then(|v| v.as_str()).unwrap_or("square_hd");
+            let size = args
+                .get("size")
+                .and_then(|v| v.as_str())
+                .unwrap_or("square_hd");
             const VALID_SIZES: &[&str] = &[
-                "square_hd", "landscape_4_3", "portrait_4_3", "landscape_16_9", "portrait_16_9",
+                "square_hd",
+                "landscape_4_3",
+                "portrait_4_3",
+                "landscape_16_9",
+                "portrait_16_9",
             ];
             if !VALID_SIZES.contains(&size) {
                 return Ok(ToolResult {
                     success: false,
                     output: String::new(),
-                    error: Some(format!("Invalid size '{size}'. Valid: {}", VALID_SIZES.join(", "))),
+                    error: Some(format!(
+                        "Invalid size '{size}'. Valid: {}",
+                        VALID_SIZES.join(", ")
+                    )),
                 });
             }
-            self.generate_via_fal(&client, &api_key, model, &prompt, size).await?
+            self.generate_via_fal(&client, &api_key, model, &prompt, size)
+                .await?
         };
 
         // ── Get image bytes (download URL or decode base64 data URI) ──
@@ -160,22 +176,33 @@ impl ImageGenTool {
                 });
             }
 
-            img_resp.bytes().await.context("Failed to read image bytes")?.to_vec()
+            img_resp
+                .bytes()
+                .await
+                .context("Failed to read image bytes")?
+                .to_vec()
         };
 
         // ── Save to disk ───────────────────────────────────────────
         let images_dir = self.workspace_dir.join("images");
-        tokio::fs::create_dir_all(&images_dir).await.context("Failed to create images directory")?;
+        tokio::fs::create_dir_all(&images_dir)
+            .await
+            .context("Failed to create images directory")?;
 
         let output_path = images_dir.join(format!("{safe_name}.png"));
-        tokio::fs::write(&output_path, &bytes).await.context("Failed to write image file")?;
+        tokio::fs::write(&output_path, &bytes)
+            .await
+            .context("Failed to write image file")?;
 
         let size_kb = bytes.len() / 1024;
         Ok(ToolResult {
             success: true,
             output: format!(
                 "Image generated successfully.\nFile: {}\nSize: {} KB\nModel: {}\nPrompt: {}",
-                output_path.display(), size_kb, model, prompt,
+                output_path.display(),
+                size_kb,
+                model,
+                prompt,
             ),
             error: None,
         })
@@ -207,7 +234,10 @@ impl ImageGenTool {
             anyhow::bail!("fal.ai API error ({status}): {body_text}");
         }
 
-        let resp_json: serde_json::Value = resp.json().await.context("Failed to parse fal.ai response")?;
+        let resp_json: serde_json::Value = resp
+            .json()
+            .await
+            .context("Failed to parse fal.ai response")?;
         resp_json
             .pointer("/images/0/url")
             .and_then(|v| v.as_str())
@@ -250,7 +280,10 @@ impl ImageGenTool {
             anyhow::bail!("OpenRouter API error ({status}): {body_text}");
         }
 
-        let resp_json: serde_json::Value = resp.json().await.context("Failed to parse OpenRouter response")?;
+        let resp_json: serde_json::Value = resp
+            .json()
+            .await
+            .context("Failed to parse OpenRouter response")?;
 
         // Format 1: images array (Gemini image models)
         // choices[0].message.images[0].image_url.url = "data:image/png;base64,..."

@@ -993,7 +993,7 @@ impl Agent {
 
             // Record cost via global tracker (if enabled)
             if let Some(ref usage) = response.usage {
-                crate::agent::loop_::record_cost_for_streaming(
+                crate::agent::cost_tracking::record_cost_for_streaming(
                     &self.model_name,
                     &effective_model,
                     usage,

@@ -39,6 +39,11 @@ impl CostTracker {
         &self.session_id
     }
 
+    /// Get the configured model pricing table.
+    pub fn prices(&self) -> &std::collections::HashMap<String, crate::config::schema::ModelPricing> {
+        &self.config.prices
+    }
+
     fn lock_storage(&self) -> MutexGuard<'_, CostStorage> {
         self.storage.lock()
     }

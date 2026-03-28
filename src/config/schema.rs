@@ -1803,6 +1803,15 @@ fn get_default_pricing() -> std::collections::HashMap<String, ModelPricing> {
         },
     );
 
+    // MiniMax models (OpenRouter pricing)
+    prices.insert(
+        "minimax/minimax-m2.7".into(),
+        ModelPricing {
+            input: 0.30,
+            output: 1.20,
+        },
+    );
+
     prices
 }
 
